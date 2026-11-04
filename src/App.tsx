@@ -2,31 +2,26 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
-  ArrowUpRight,
   CalendarDays,
-  Check,
-  CheckCheck,
   ChevronDown,
-  Clock3,
-  Heart,
-  MapPin,
-  Menu,
+  Home as HomeIcon,
   Plus,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
+  ReceiptText,
   Users,
-  Utensils,
   X,
 } from "lucide-react";
-import { Modal } from "./components/Modal";
-import { Avatars, Brand } from "./components/Brand";
+import { Brand } from "./components/Brand";
+import { Home } from "./components/Home";
+import type { ComposerValues } from "./components/Home";
 import { ExperienceArt } from "./components/ExperienceArt";
-import { CreatePlan, ExpenseForm } from "./components/Forms";
+import { ExpenseForm } from "./components/Forms";
+import { ExpenseLedger, SpendBar } from "./components/ExpenseLedger";
+import { Modal } from "./components/Modal";
+import { PlanSheet } from "./components/PlanSheet";
+import { RouteLine } from "./components/RouteLine";
 import {
   dateLabel,
   experienceFor,
-  experiences,
   initialDemo,
   loadDemo,
   localDate,
@@ -34,162 +29,230 @@ import {
   money,
   storageKey,
 } from "./data";
-import type { Category, Demo, Plan, Status, View } from "./data";
+import type { Demo, Experience, Expense, Plan, View } from "./data";
+import { event, needsYou, nextAction, placeFor, totalFor } from "./plan";
+import type { Role } from "./plan";
 import "./App.css";
 
 type Dialog =
-  | { type: "experience"; id: string }
-  | { type: "plan"; id: string }
-  | { type: "create"; experienceId?: string; editId?: string }
+  | { type: "experience"; experience: Experience }
   | { type: "expense"; planId?: string }
   | { type: "cancel"; id: string }
-  | { type: "people" | "about" | "reset" }
+  | { type: "about" | "reset" | "people" }
   | null;
-const categories: Category[] = [
-  "All experiences",
-  "Good food",
-  "Make something",
-  "A little adventure",
-];
+const navigation = [
+  { view: "discover", label: "Home", icon: HomeIcon },
+  { view: "plans", label: "Plans", icon: CalendarDays },
+  { view: "expenses", label: "Expenses", icon: ReceiptText },
+] as const;
+function currentRoute() {
+  return window.location.hash.slice(1).split("?")[0] || "home";
+}
 
 export default function App() {
   const [demo, setDemo] = useState<Demo>(loadDemo);
-  const [view, setView] = useState<View>("discover");
-  const [category, setCategory] = useState<Category>("All experiences");
-  const [savedOnly, setSavedOnly] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-  const [role, setRole] = useState<"employee" | "manager">("employee");
+  const [role, setRole] = useState<Role>("employee");
+  const [year] = useState(() => new Date().getFullYear());
+  const [route, setRoute] = useState(currentRoute);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [toast, setToast] = useState("");
-  const [brief, setBrief] = useState("");
-  const [planFilter, setPlanFilter] = useState("Upcoming");
-  const [expenseFilter, setExpenseFilter] = useState("all");
   const [storageError, setStorageError] = useState(false);
-  const profileRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(demo));
-      setStorageError(false);
-    } catch {
-      setStorageError(true);
-    }
-  }, [demo]);
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(""), 4500);
-    return () => clearTimeout(timer);
-  }, [toast]);
-  useEffect(() => {
-    if (!profileOpen) return;
-    const close = (event: MouseEvent) => {
-      if (!profileRef.current?.contains(event.target as Node))
-        setProfileOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProfileOpen(false);
-    };
-    document.addEventListener("click", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("click", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [profileOpen]);
-
-  function navigate(next: View) {
-    setView(next);
-    setMobileOpen(false);
-    window.scrollTo({ top: 0, behavior: "instant" });
-  }
-  function saveExperience(id: string) {
-    setDemo((current) => ({
-      ...current,
-      saved: current.saved.includes(id)
-        ? current.saved.filter((item) => item !== id)
-        : [...current.saved, id],
-    }));
-  }
-  function updatePlan(id: string, status: Status) {
-    setDemo((current) => ({
-      ...current,
-      plans: current.plans.map((plan) =>
-        plan.id === id ? { ...plan, status } : plan,
-      ),
-    }));
-    setToast(
-      status === "Approved"
-        ? "Plan approved. Your team can RSVP."
-        : status === "Awaiting approval"
-          ? "Sent to your manager for review."
-          : status === "Cancelled"
-            ? "Outing cancelled. Your records are kept."
-            : "Changes requested. The organiser can edit and resubmit.",
-    );
-  }
-  function rsvp(id: string) {
-    setDemo((current) => ({
-      ...current,
-      plans: current.plans.map((plan) =>
-        plan.id === id
-          ? {
-              ...plan,
-              going: plan.going.includes("akin")
-                ? plan.going.filter((person) => person !== "akin")
-                : [...plan.going, "akin"],
-            }
-          : plan,
-      ),
-    }));
-  }
-  const upcoming = demo.plans
-    .filter((plan) => plan.status === "Approved" && plan.date >= localDate())
-    .sort((a, b) => a.date.localeCompare(b.date))[0];
-  const pending = demo.plans.filter(
-    (plan) => plan.status === "Awaiting approval",
-  ).length;
-  const activePlans = demo.plans.filter((plan) => plan.status !== "Cancelled");
-  const totalBudget = activePlans.reduce(
-    (total, plan) => total + plan.budget,
-    0,
+  const [planFilter, setPlanFilter] = useState(() =>
+    window.location.hash === "#plans?needs-you" ? "Needs you" : "auto",
   );
-  const totalSpent = demo.expenses
-    .filter((expense) => activePlans.some((plan) => plan.id === expense.planId))
-    .reduce((total, expense) => total + expense.amount, 0);
-  const matches = experiences.filter(
-    (experience) =>
-      (category === "All experiences" || experience.category === category) &&
-      (!savedOnly || demo.saved.includes(experience.id)),
-  );
-  const visibleExperiences =
-    category === "All experiences" && !savedOnly && !showAll
-      ? matches.slice(0, 3)
-      : matches;
-  const visiblePlans = demo.plans.filter(
+  const [expenseFilter, setExpenseFilter] = useState("all");
+  const profile = useRef<HTMLDivElement>(null);
+  const main = useRef<HTMLElement>(null);
+  const pending = demo.plans.filter((plan) => needsYou(plan, role)).length;
+  const view: View = route.startsWith("plan")
+    ? "plans"
+    : route === "expenses"
+      ? "expenses"
+      : "discover";
+  const selectedPlan = route.startsWith("plan/")
+    ? demo.plans.find((plan) => plan.id === route.slice(5))
+    : undefined;
+  const currentFilter =
+    planFilter === "auto" ? (pending ? "Needs you" : "Upcoming") : planFilter;
+  const filteredPlans = demo.plans.filter(
     (plan) =>
-      planFilter === "All plans" ||
-      (planFilter === "Upcoming"
-        ? plan.status === "Approved" && plan.date >= localDate()
-        : planFilter === "Needs attention"
-          ? ["Draft", "Awaiting approval", "Changes requested"].includes(
-              plan.status,
-            )
-          : plan.status === "Cancelled" || plan.date < localDate()),
+      currentFilter === "All" ||
+      (currentFilter === "Needs you"
+        ? needsYou(plan, role)
+        : currentFilter === "Upcoming"
+          ? plan.status === "Approved" &&
+            !plan.settledAt &&
+            plan.date >= localDate()
+          : plan.status === "Cancelled" ||
+            (plan.status === "Approved" &&
+              (plan.date < localDate() || !!plan.settledAt))),
   );
   const visibleExpenses = demo.expenses.filter(
     (expense) => expenseFilter === "all" || expense.planId === expenseFilter,
   );
+  const activePlans = demo.plans.filter((plan) => plan.status !== "Cancelled");
+  const budget = activePlans.reduce((sum, plan) => sum + plan.budget, 0);
+  const spent = demo.expenses
+    .filter((expense) => activePlans.some((plan) => plan.id === expense.planId))
+    .reduce((sum, expense) => sum + expense.amount, 0);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(demo));
+    } catch {
+      // oxlint-disable-next-line react/set-state-in-effect -- Report failure from the external browser storage API.
+      setStorageError(true);
+    }
+  }, [demo]);
+  useEffect(() => {
+    const update = () => {
+      setRoute(currentRoute());
+      if (window.location.hash === "#plans?needs-you")
+        setPlanFilter("Needs you");
+      window.scrollTo({ top: 0, behavior: "instant" });
+    };
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(""), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  useEffect(() => {
+    if (!profileOpen) return;
+    const click = (e: MouseEvent) => {
+      if (!profile.current?.contains(e.target as Node)) setProfileOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setProfileOpen(false);
+        profile.current?.querySelector("button")?.focus();
+      }
+    };
+    document.addEventListener("click", click);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("click", click);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [profileOpen]);
+  useEffect(() => {
+    if (route.startsWith("plan/")) main.current?.focus({ preventScroll: true });
+  }, [route]);
+
+  function navigate(next: string) {
+    window.location.hash = next;
+  }
+  function savePlan(plan: Plan) {
+    setDemo((current) => ({
+      ...current,
+      plans: current.plans.map((item) => (item.id === plan.id ? plan : item)),
+    }));
+  }
+  function start(
+    values: ComposerValues = {
+      brief: "",
+      people: 8,
+      location: "Lagos",
+      date: localDate(8),
+      perPerson: 25000,
+    },
+    experienceId?: string,
+  ) {
+    const chosen =
+      experienceId ??
+      (/(clay|potter|creativ|mak)/i.test(values.brief)
+        ? "clay"
+        : /(court|tennis|outdoor|sport)/i.test(values.brief)
+          ? "court"
+          : /(dinner|supper|evening)/i.test(values.brief)
+            ? "supper"
+            : "long-table");
+    const plan: Plan = {
+      id: crypto.randomUUID(),
+      experienceId: chosen,
+      title: "A little time together",
+      date: values.date,
+      time: "13:00",
+      people: values.people,
+      budget: values.people * values.perPerson,
+      location: values.location,
+      status: "Draft",
+      note: values.brief,
+      attendees: members.slice(0, values.people).map((member) => member.id),
+      going: [],
+      declined: [],
+      events: [event("Akin created the draft.")],
+    };
+    setDemo((current) => ({ ...current, plans: [...current.plans, plan] }));
+    setRole("employee");
+    setDialog(null);
+    navigate(`plan/${plan.id}`);
+  }
+  function rsvp(plan: Plan, going: boolean) {
+    if (
+      role !== "employee" ||
+      plan.status !== "Approved" ||
+      !plan.attendees.includes("akin") ||
+      plan.settledAt ||
+      plan.date < localDate()
+    )
+      return;
+    const previous = going
+      ? plan.going.includes("akin")
+      : plan.declined?.includes("akin");
+    if (previous) return;
+    const next = {
+      ...plan,
+      going: [
+        ...plan.going.filter((id) => id !== "akin"),
+        ...(going ? ["akin"] : []),
+      ],
+      declined: [
+        ...(plan.declined ?? []).filter((id) => id !== "akin"),
+        ...(!going ? ["akin"] : []),
+      ],
+      events: [
+        ...(plan.events ?? []),
+        event(`Akin ${going ? "is going." : "can’t make it."}`),
+      ],
+    };
+    savePlan(next);
+    setToast(
+      `RSVP updated. ${next.going.length} of ${next.people} people going.`,
+    );
+  }
+  function addExpense(expense: Expense) {
+    setDemo((current) => ({
+      ...current,
+      expenses: [...current.expenses, expense],
+      plans: current.plans.map((plan) =>
+        plan.id === expense.planId
+          ? {
+              ...plan,
+              events: [
+                ...(plan.events ?? []),
+                event(
+                  `${expense.payer} recorded ${money(expense.amount)} for ${expense.description}.`,
+                ),
+              ],
+            }
+          : plan,
+      ),
+    }));
+    setDialog(null);
+    setToast("Expense recorded. No payment was made.");
+  }
   function exportExpenses() {
     if (!visibleExpenses.length) {
-      setToast("There are no expenses to export yet.");
+      setToast("There are no expenses to export.");
       return;
     }
     const cell = (value: string | number) =>
       `"${String(value)
-        .replace(/^[=+@\-]/, "'$&")
+        .replace(/^[=+@-]/, "'$&")
         .replaceAll('"', '""')}"`;
     const rows = [
       ["Date", "Outing", "Description", "Category", "Paid by", "Amount (NGN)"],
@@ -213,856 +276,527 @@ export default function App() {
     link.download = `teamfare-expenses-${localDate()}.csv`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setToast("Your expense report has been downloaded.");
+    setToast("Expense report downloaded.");
   }
-
+  const navLinks = navigation.map(({ view: item, label, icon: Icon }) => (
+    <a
+      key={item}
+      href={`#${item === "discover" ? "home" : item}`}
+      aria-label={label}
+      aria-current={view === item ? "page" : undefined}
+    >
+      <Icon size={19} />
+      <span>{label}</span>
+      {item === "plans" && pending > 0 && (
+        <span className="nav-count" aria-label={`${pending} need you`}>
+          {pending}
+        </span>
+      )}
+    </a>
+  ));
   return (
     <>
-      <a className="skip-link" href="#main">
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(e) => {
+          e.preventDefault();
+          main.current?.focus();
+        }}
+      >
         Skip to content
       </a>
       <header className="site-header">
-        <button
-          className="brand-button"
-          onClick={() => navigate("discover")}
-          aria-label="Teamfare home"
-        >
-          <Brand />
-        </button>
-        <nav
-          className={mobileOpen ? "main-nav is-open" : "main-nav"}
-          aria-label="Main navigation"
-        >
-          {(
-            [
-              ["discover", "Discover"],
-              ["plans", "Our plans"],
-              ["expenses", "Expenses"],
-            ] as const
-          ).map(([key, label]) => (
+        <div className="header-inner">
+          <a href="#home" aria-label="Teamfare home" className="brand-link">
+            <Brand />
+          </a>
+          <nav className="main-nav" aria-label="Main navigation">
+            {navLinks}
+          </nav>
+          <div className="account" ref={profile}>
+            <span className="team-name">Koto team</span>
             <button
-              key={key}
-              className={view === key ? "active" : ""}
-              aria-current={view === key ? "page" : undefined}
-              onClick={() => navigate(key)}
-            >
-              {label}
-              {key === "plans" && role === "manager" && pending > 0 && (
-                <span className="nav-count">{pending}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="header-actions">
-          <span className="company-label">THE KOTO TEAM</span>
-          <div className="profile-wrap" ref={profileRef}>
-            <button
-              className="profile-button"
+              className="account-button"
               aria-label="Account and demo role"
               aria-expanded={profileOpen}
               onClick={() => setProfileOpen(!profileOpen)}
             >
-              <span className="profile-avatar">
+              <span className="monogram">
                 {role === "employee" ? "AC" : "NB"}
               </span>
-              <ChevronDown size={14} />
+              <ChevronDown size={15} />
             </button>
             {profileOpen && (
-              <div className="profile-menu">
-                <span className="eyebrow">YOU’RE EXPLORING AS</span>
+              <div className="account-menu">
                 <strong>
                   {role === "employee" ? "Akin Cole" : "Nadia Bello"}
                 </strong>
-                <p>
+                <span>
                   {role === "employee"
-                    ? "Team member"
-                    : "People & culture manager"}
-                </p>
-                <button
-                  onClick={() => {
-                    setRole(role === "employee" ? "manager" : "employee");
-                    setProfileOpen(false);
-                    setToast(
-                      `Switched to the ${role === "employee" ? "manager" : "employee"} demo.`,
-                    );
-                  }}
-                >
-                  <Users size={16} />
-                  Try the {role === "employee" ? "manager" : "employee"} view
-                  <ArrowRight size={14} />
-                </button>
+                    ? "Employee · organiser"
+                    : "Manager · approvals"}
+                </span>
+                <hr />
+                {(["employee", "manager"] as const).map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => {
+                      setRole(item);
+                      setPlanFilter("auto");
+                      setProfileOpen(false);
+                    }}
+                    aria-pressed={role === item}
+                  >
+                    Try the {item} view<span>{role === item ? "✓" : "→"}</span>
+                  </button>
+                ))}
                 <button
                   onClick={() => {
                     setDialog({ type: "people" });
                     setProfileOpen(false);
                   }}
                 >
-                  Our people & preferences
-                  <ArrowUpRight size={15} />
+                  Team preferences
+                  <Users size={15} />
                 </button>
-                <button
-                  onClick={() => {
-                    setDialog({ type: "about" });
-                    setProfileOpen(false);
-                  }}
-                >
-                  About this preview
-                  <ArrowUpRight size={15} />
-                </button>
+                <p>Role switch for this local preview; not authentication.</p>
               </div>
             )}
           </div>
-          <button
-            className="mobile-menu icon-button"
-            aria-label="Toggle navigation"
-            aria-expanded={mobileOpen}
-            onClick={() => setMobileOpen(!mobileOpen)}
-          >
-            {mobileOpen ? <X size={23} /> : <Menu size={23} />}
-          </button>
         </div>
       </header>
-      {storageError && (
-        <div className="storage-warning" role="status">
-          Your browser can’t save this preview. Changes will last until you
-          close this page.
-        </div>
-      )}
-      <main id="main">
+      <nav className="bottom-nav" aria-label="Mobile navigation">
+        {navLinks}
+      </nav>
+      <main
+        id="main"
+        ref={main}
+        tabIndex={-1}
+        className={`page-width ${selectedPlan ? "sheet-page" : ""}`}
+      >
+        {storageError && (
+          <p className="storage-warning" role="alert">
+            Browser storage is unavailable. Changes will be lost when you close
+            this page.
+          </p>
+        )}
         {view === "discover" && (
-          <>
-            <section className="hero-section page-width">
-              <div className="hero-copy">
-                <div className="eyebrow hero-eyebrow">
-                  <span className="little-star">✳</span>GOOD THINGS HAPPEN OFF
-                  THE CLOCK
-                </div>
-                <h1>
-                  Good people.
-                  <br />
-                  <em>Great plans.</em>
-                </h1>
+          <Home
+            demo={demo}
+            role={role}
+            onStart={start}
+            onSaveIdea={(id) =>
+              setDemo((current) => ({
+                ...current,
+                saved: current.saved.includes(id)
+                  ? current.saved.filter((item) => item !== id)
+                  : [...current.saved, id],
+              }))
+            }
+            onExplore={(experience) =>
+              setDialog({ type: "experience", experience })
+            }
+          />
+        )}
+        {view === "plans" &&
+          (route.startsWith("plan/") ? (
+            selectedPlan ? (
+              <PlanSheet
+                key={`${selectedPlan.id}-${selectedPlan.status}-${role}`}
+                plan={selectedPlan}
+                expenses={demo.expenses.filter(
+                  (expense) => expense.planId === selectedPlan.id,
+                )}
+                role={role}
+                onSave={savePlan}
+                onRsvp={(going) => rsvp(selectedPlan, going)}
+                onExpense={() =>
+                  setDialog({ type: "expense", planId: selectedPlan.id })
+                }
+                onCancel={() =>
+                  setDialog({ type: "cancel", id: selectedPlan.id })
+                }
+                announce={setToast}
+              />
+            ) : (
+              <div className="empty-state">
+                <h1>Plan not found</h1>
                 <p>
-                  The best team moments don’t happen in a meeting.
-                  <br className="desktop-break" /> Let’s get your people
-                  together. We’ll sort the details.
+                  This plan may have been removed when the preview was reset.
                 </p>
-                <form
-                  className="brief-composer"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setDialog({ type: "create" });
-                  }}
-                >
-                  <label htmlFor="brief">
-                    <Sparkles size={16} />A LITTLE IDEA GOES A LONG WAY
-                  </label>
-                  <textarea
-                    id="brief"
-                    rows={2}
-                    value={brief}
-                    onChange={(event) => setBrief(event.target.value)}
-                    placeholder="Dinner for eight? An afternoon making something? Tell us what you have in mind…"
-                    maxLength={500}
-                  />
-                  <div className="composer-bottom">
-                    <span>THE PEOPLE. THE PLAN. THE PAPERWORK.</span>
-                    <button
-                      className="square-arrow"
-                      aria-label="Plan an outing"
-                      type="submit"
-                    >
-                      <span>Make a plan</span>
-                      <ArrowUpRight size={19} />
-                    </button>
-                  </div>
-                </form>
-                <div className="hero-footnote">
-                  <Avatars />
-                  <span>
-                    Less organising.
-                    <br />
-                    <strong>More “we should do this again.”</strong>
-                  </span>
-                </div>
+                <a href="#plans" className="button button-outline">
+                  Back to plans
+                </a>
               </div>
-              <div className="hero-visual">
-                <div className="photo-caption">
-                  <span>THE TEAM THAT EATS TOGETHER…</span>
-                  <span>01 / THE GOOD STUFF</span>
-                </div>
-                <div className="hero-photo">
-                  <img
-                    src="/images/together.jpg"
-                    alt="Friends and colleagues catching up over a shared meal"
-                    fetchPriority="high"
-                  />
-                  <span className="photo-note">A table for everyone.</span>
-                </div>
-                <div className="outing-ticket">
-                  <span className="ticket-eyebrow">YOU’RE INVITED TO</span>
-                  <strong>
-                    less small talk.
-                    <br />
-                    <i>more good times.</i>
-                  </strong>
-                  <div className="ticket-rule" />
-                  <span>
-                    YOUR TEAM + SOMETHING DIFFERENT <ArrowUpRight size={20} />
-                  </span>
-                </div>
-                <div className="round-stamp" aria-hidden="true">
-                  <span>GOOD</span>
-                  <svg viewBox="0 0 40 40">
-                    <path d="M20 4v32M4 20h32M9 9l22 22M9 31 31 9" />
-                  </svg>
-                  <span>COMPANY</span>
-                </div>
-              </div>
-            </section>
-            <section
-              className="up-next page-width"
-              aria-label="Your next outing"
-            >
-              <div className="up-next-intro">
-                <span className="eyebrow">SOMETHING TO LOOK FORWARD TO</span>
-                <span className="hand-arrow" aria-hidden="true">
-                  ↳
-                </span>
-              </div>
-              {upcoming ? (
-                <button
-                  className="next-outing"
-                  onClick={() => setDialog({ type: "plan", id: upcoming.id })}
-                >
-                  <span className="date-block">
-                    <strong>
-                      {dateLabel(upcoming.date, { day: "2-digit" })}
-                    </strong>
-                    <span>{dateLabel(upcoming.date, { month: "short" })}</span>
-                  </span>
-                  <span className="next-outing-name">
-                    <strong>{upcoming.title}</strong>
-                    <span>
-                      {experienceFor(upcoming.experienceId).name} ·{" "}
-                      {upcoming.time} · {upcoming.people} people
-                    </span>
-                  </span>
-                  <Avatars ids={upcoming.attendees} small />
-                  <span className="inline-link">
-                    See the plan <ArrowRight size={18} />
-                  </span>
-                </button>
-              ) : (
-                <button
-                  className="next-outing empty-next"
-                  onClick={() => setDialog({ type: "create" })}
-                >
-                  <strong>Your next good memory starts with a plan.</strong>
-                  <span className="inline-link">
-                    Make one <ArrowRight size={18} />
-                  </span>
-                </button>
-              )}
-            </section>
-            <section className="discovery-section page-width" id="experiences">
-              <div className="section-heading">
+            )
+          ) : (
+            <section className="plans-page">
+              <header className="page-heading">
                 <div>
-                  <span className="eyebrow">
-                    CLOSE THE LAPTOP. OPEN UP THE POSSIBILITIES.
-                  </span>
-                  <h2>
-                    What’s your team’s <em>thing?</em>
-                  </h2>
+                  <span className="eyebrow">Good ideas, taking shape</span>
+                  <h1>Plans</h1>
+                  <p>From “we should” to “see you there”.</p>
                 </div>
-                <p>
-                  Big catch-ups. Small adventures.
-                  <br />A few ideas to get everyone out there.
-                </p>
-              </div>
-              <div className="discovery-toolbar">
-                <div className="category-tabs" aria-label="Filter experiences">
-                  {categories.map((item) => (
-                    <button
-                      key={item}
-                      aria-pressed={category === item}
-                      onClick={() => setCategory(item)}
-                      className={category === item ? "selected" : ""}
-                    >
-                      {item === "All experiences" ? (
-                        <Sparkles size={15} />
-                      ) : item === "Good food" ? (
-                        <Utensils size={15} />
-                      ) : item === "Make something" ? (
-                        <span className="category-mark" aria-hidden="true">
-                          ✳
-                        </span>
-                      ) : (
-                        <ArrowUpRight size={17} />
-                      )}
-                      {item}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  className={`saved-filter ${savedOnly ? "selected" : ""}`}
-                  aria-label={
-                    savedOnly
-                      ? "Show all experiences"
-                      : "Show saved experiences"
-                  }
-                  aria-pressed={savedOnly}
-                  onClick={() => setSavedOnly(!savedOnly)}
-                >
-                  <Heart size={17} fill={savedOnly ? "currentColor" : "none"} />
-                  <span>
-                    Saved
-                    {demo.saved.length > 0 ? ` (${demo.saved.length})` : ""}
-                  </span>
+                <button className="button button-dark" onClick={() => start()}>
+                  Plan something
+                  <Plus size={18} />
                 </button>
-              </div>
-              <div className="experience-grid">
-                {visibleExperiences.length ? (
-                  visibleExperiences.map((experience, index) => (
-                    <article
-                      className="experience-card"
-                      key={experience.id}
-                      style={{ animationDelay: `${index * 70}ms` }}
-                    >
-                      <div className="experience-image-wrap">
-                        <button
-                          className="experience-image-button"
-                          onClick={() =>
-                            setDialog({ type: "experience", id: experience.id })
-                          }
-                          aria-label={`Explore ${experience.name}`}
-                        >
-                          <ExperienceArt experience={experience} />
-                        </button>
-                        <span className="experience-label">
-                          {experience.category}
-                        </span>
-                        <button
-                          className={`save-button ${demo.saved.includes(experience.id) ? "is-saved" : ""}`}
-                          aria-label={`${demo.saved.includes(experience.id) ? "Unsave" : "Save"} ${experience.name}`}
-                          aria-pressed={demo.saved.includes(experience.id)}
-                          onClick={() => saveExperience(experience.id)}
-                        >
-                          <Heart
-                            size={19}
-                            fill={
-                              demo.saved.includes(experience.id)
-                                ? "currentColor"
-                                : "none"
-                            }
-                          />
-                        </button>
-                      </div>
-                      <div className="card-meta">
-                        <span>
-                          <MapPin size={13} />
-                          {experience.area.split(",")[0]}
-                        </span>
-                        <span>{experience.duration}</span>
-                      </div>
-                      <button
-                        className="card-title"
-                        onClick={() =>
-                          setDialog({ type: "experience", id: experience.id })
-                        }
-                      >
-                        <h3>{experience.name}</h3>
-                        <ArrowUpRight size={23} />
-                      </button>
-                      <p className="card-subtitle">{experience.subtitle}</p>
-                      <div className="card-bottom">
-                        <span>
-                          <strong>{money(experience.price)}</strong> / person
-                        </span>
-                        <span>Sample experience</span>
-                      </div>
-                    </article>
-                  ))
-                ) : (
-                  <div className="empty-state">
-                    <Heart size={27} />
-                    <h3>A little room for favourites.</h3>
-                    <p>
-                      Save an experience with the heart, and you’ll find it
-                      here.
-                    </p>
+              </header>
+              <div className="text-tabs" role="group" aria-label="Filter plans">
+                {["Needs you", "Upcoming", "Past and cancelled", "All"].map(
+                  (filter) => (
                     <button
-                      className="text-button"
+                      key={filter}
+                      aria-pressed={currentFilter === filter}
+                      className={currentFilter === filter ? "active" : ""}
                       onClick={() => {
-                        setCategory("All experiences");
-                        setSavedOnly(false);
+                        setPlanFilter(filter);
+                        if (window.location.hash.includes("?"))
+                          navigate("plans");
                       }}
                     >
-                      Explore all experiences <ArrowRight size={16} />
+                      {filter}
+                      {filter === "Needs you" && (
+                        <span className={pending ? "attention-count" : ""}>
+                          {pending}
+                        </span>
+                      )}
                     </button>
-                  </div>
+                  ),
                 )}
               </div>
-              <div className="discovery-bottom">
-                <p className="sample-caption">
-                  A taste of what’s possible. Sample experiences and estimated
-                  prices, not bookable venue listings.
-                </p>
-                {category === "All experiences" && !savedOnly && !showAll && (
-                  <button
-                    className="text-button"
-                    onClick={() => setShowAll(true)}
+              <div className="plans-list">
+                {filteredPlans.map((plan) => (
+                  <a
+                    href={`#plan/${plan.id}`}
+                    key={plan.id}
+                    className="plan-row"
+                    aria-label={`View ${plan.title}`}
                   >
-                    A few more ideas <ArrowRight size={15} />
-                  </button>
-                )}
-              </div>
-            </section>
-            <section className="how-section page-width">
-              <div className="how-title">
-                <span className="eyebrow">
-                  FROM “WE SHOULD” TO “SEE YOU THERE”
-                </span>
-                <h2>
-                  All the good bits.
-                  <br />
-                  <em>Less of the back-and-forth.</em>
-                </h2>
-                <button
-                  className="text-button"
-                  onClick={() => setDialog({ type: "create" })}
-                >
-                  Let’s make a plan <ArrowUpRight size={20} />
-                </button>
-              </div>
-              <div className="how-steps">
-                {[
-                  [
-                    "01",
-                    "Find your kind of good.",
-                    "Tell us the mood, the people, and the budget. Start with a little inspiration.",
-                  ],
-                  [
-                    "02",
-                    "Get everyone on board.",
-                    "Put the plan in one place. Give your manager the details and your team something to look forward to.",
-                  ],
-                  [
-                    "03",
-                    "Keep the memories. And the receipts.",
-                    "Track what was spent, who paid, and what’s left. The admin gets a proper ending, too.",
-                  ],
-                ].map(([number, title, text]) => (
-                  <div className="how-step" key={number}>
-                    <span>{number}</span>
-                    <div>
-                      <h3>{title}</h3>
-                      <p>{text}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
-        {view === "plans" && (
-          <section className="inner-page page-width">
-            <div className="page-intro">
-              <div>
-                <span className="eyebrow">SOMETHING GOOD ON THE CALENDAR</span>
-                <h1>
-                  Our <em>plans.</em>
-                </h1>
-                <p>
-                  {role === "manager"
-                    ? "A little oversight. A lot to look forward to."
-                    : "From the first idea to the last “that was fun.”"}
-                </p>
-              </div>
-              <button
-                className="button button-dark"
-                onClick={() => setDialog({ type: "create" })}
-              >
-                <Plus size={18} />
-                Plan something good
-              </button>
-            </div>
-            {role === "manager" && pending > 0 && (
-              <div className="manager-notice">
-                <ShieldCheck size={25} />
-                <div>
-                  <strong>
-                    {pending} {pending === 1 ? "plan needs" : "plans need"} your
-                    good-to-go.
-                  </strong>
-                  <p>
-                    Review the people, estimated cost, and budget before
-                    approving.
-                  </p>
-                </div>
-                <button
-                  className="inline-link"
-                  onClick={() => setPlanFilter("Needs attention")}
-                >
-                  Review plans <ArrowRight size={18} />
-                </button>
-              </div>
-            )}
-            <div className="list-tabs">
-              {[
-                "Upcoming",
-                "Needs attention",
-                "Past & cancelled",
-                "All plans",
-              ].map((filter) => (
-                <button
-                  key={filter}
-                  className={planFilter === filter ? "selected" : ""}
-                  onClick={() => setPlanFilter(filter)}
-                >
-                  {filter}
-                </button>
-              ))}
-            </div>
-            <div className="plan-list">
-              {visiblePlans.length ? (
-                visiblePlans.map((plan) => (
-                  <article className="plan-row" key={plan.id}>
                     <div className="plan-thumbnail">
                       <ExperienceArt
                         experience={experienceFor(plan.experienceId)}
                       />
                     </div>
                     <div className="plan-row-main">
-                      <StatusLabel status={plan.status} />
-                      <button
-                        onClick={() => setDialog({ type: "plan", id: plan.id })}
-                      >
-                        <h2>{plan.title}</h2>
-                      </button>
+                      <h2>{plan.title}</h2>
                       <p>
-                        {experienceFor(plan.experienceId).name} ·{" "}
-                        {dateLabel(plan.date)} · {plan.time}
+                        {dateLabel(plan.date)} · {placeFor(plan)} ·{" "}
+                        {plan.people} people
                       </p>
-                      <div className="plan-row-details">
-                        <span>
-                          <Users size={15} />
-                          {plan.people} people
-                        </span>
-                        <span>
-                          {money(
-                            experienceFor(plan.experienceId).price *
-                              plan.people,
-                          )}{" "}
-                          estimate
-                        </span>
-                        <span>{plan.going.length} going</span>
-                      </div>
+                      <RouteLine compact plan={plan} />
                     </div>
-                    <button
-                      className="plan-row-action icon-button"
-                      aria-label={`View ${plan.title}`}
-                      onClick={() => setDialog({ type: "plan", id: plan.id })}
-                    >
-                      <ArrowUpRight size={25} />
-                    </button>
-                  </article>
-                ))
-              ) : (
+                    <div className="plan-row-cost">
+                      <strong>
+                        {money(totalFor(plan))}
+                        <small>Estimate · total</small>
+                      </strong>
+                      <span>
+                        {money(experienceFor(plan.experienceId).price)} per
+                        person
+                      </span>
+                      <span
+                        className={`row-action ${needsYou(plan, role) ? "needs-action" : ""}`}
+                      >
+                        {nextAction(plan, role)}
+                        <ArrowRight size={16} />
+                      </span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+              {!filteredPlans.length && (
                 <div className="empty-state">
-                  <CalendarDays size={28} />
-                  <h3>Good things take a first step.</h3>
+                  <CalendarDays size={40} strokeWidth={1} />
+                  <h2>
+                    {currentFilter === "Needs you"
+                      ? "You’re all caught up."
+                      : currentFilter === "Upcoming"
+                        ? "Make room for a good plan."
+                        : "Nothing here yet."}
+                  </h2>
                   <p>
-                    No plans in this view yet. Start a new one or browse all
-                    plans.
+                    {currentFilter === "Needs you"
+                      ? "No plans are waiting on your next move."
+                      : "Your team’s outings will appear here."}
                   </p>
-                  <button
-                    className="button button-dark"
-                    onClick={() => setDialog({ type: "create" })}
-                  >
-                    Plan an outing <ArrowRight size={17} />
+                  <button className="text-button" onClick={() => start()}>
+                    Start a plan
+                    <ArrowRight size={16} />
                   </button>
                 </div>
               )}
-            </div>
-            <div className="bottom-note">
-              <Sparkles size={18} />
-              <p>
-                Plans and approvals are saved in this browser. Venue
-                reservations and invitations aren’t sent in this preview.
-              </p>
-            </div>
-          </section>
-        )}
-        {view === "expenses" && (
-          <section className="inner-page page-width">
-            <div className="page-intro">
-              <div>
-                <span className="eyebrow">GOOD TIMES. TIDY NUMBERS.</span>
-                <h1>
-                  The team <em>tab.</em>
-                </h1>
-                <p>All the little costs, without the big spreadsheet.</p>
-              </div>
-              <button
-                className="button button-dark"
-                onClick={() => setDialog({ type: "expense" })}
-              >
-                <Plus size={18} />
-                Add an expense
-              </button>
-            </div>
-            <div className="expense-summary">
-              <div>
-                <span className="eyebrow">PLANNED BUDGET</span>
-                <strong>{money(totalBudget)}</strong>
-                <span>Across {activePlans.length} active outings</span>
-              </div>
-              <div>
-                <span className="eyebrow">RECORDED SPEND</span>
-                <strong>{money(totalSpent)}</strong>
-                <span>For active outings</span>
-              </div>
-              <div>
-                <span className="eyebrow">BUDGET BALANCE</span>
-                <strong
-                  className={totalBudget - totalSpent < 0 ? "over-budget" : ""}
-                >
-                  {money(totalBudget - totalSpent)}
-                </strong>
-                <span>
-                  {totalBudget - totalSpent < 0
-                    ? "Over planned budget"
-                    : "Available across active outings"}
-                </span>
-              </div>
-            </div>
-            <div className="expenses-toolbar">
-              <label>
-                <SlidersHorizontal size={16} />
-                <select
-                  aria-label="Filter expenses by outing"
-                  value={expenseFilter}
-                  onChange={(event) => setExpenseFilter(event.target.value)}
-                >
-                  <option value="all">All outings</option>
-                  {demo.plans.map((plan) => (
-                    <option key={plan.id} value={plan.id}>
-                      {plan.title}
-                    </option>
+              {!demo.plans.length && (
+                <div className="first-run">
+                  <h2>A good plan, in five steps.</h2>
+                  {[
+                    "Idea — shape the outing.",
+                    "Proposed — send it for review.",
+                    "Approved — let the team RSVP.",
+                    "Happening — enjoy the time together.",
+                    "Settled — finish the expense record.",
+                  ].map((text) => (
+                    <p key={text}>{text}</p>
                   ))}
-                </select>
-              </label>
-              <button className="text-button" onClick={exportExpenses}>
-                <ArrowDownToLine size={16} />
-                Export CSV
-              </button>
-            </div>
-            <div className="table-scroll">
-              <table className="expenses-table">
-                <thead>
-                  <tr>
-                    <th>THE LITTLE DETAILS</th>
-                    <th>OUTING</th>
-                    <th>PAID BY</th>
-                    <th>AMOUNT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleExpenses.map((expense) => (
-                    <tr key={expense.id}>
-                      <td>
-                        <strong>{expense.description}</strong>
-                        <span>
-                          {dateLabel(expense.date)} · {expense.category}
-                        </span>
-                      </td>
-                      <td>
-                        {
-                          demo.plans.find((plan) => plan.id === expense.planId)
-                            ?.title
-                        }
-                      </td>
-                      <td>{expense.payer}</td>
-                      <td>{money(expense.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!visibleExpenses.length && (
-                <div className="empty-state">
-                  <h3>A clean slate.</h3>
-                  <p>Add your first expense, or choose another outing.</p>
                 </div>
               )}
-            </div>
-            <div className="bottom-note">
-              <CheckCheck size={19} />
+              <p className="field-help page-footnote">
+                Plans and decisions are saved in this browser. Bookings and
+                invitations are not sent.
+              </p>
+            </section>
+          ))}
+        {view === "expenses" && (
+          <section className="expenses-page">
+            <header className="page-heading">
+              <div>
+                <span className="eyebrow">Every outing, accounted for</span>
+                <h1>Expenses</h1>
+                <p>A clear record. Fewer loose ends.</p>
+              </div>
+              <div className="page-heading-actions">
+                <button
+                  className="button button-outline"
+                  onClick={exportExpenses}
+                >
+                  <ArrowDownToLine size={17} />
+                  Export CSV
+                </button>
+                <button
+                  className="button button-dark"
+                  onClick={() => setDialog({ type: "expense" })}
+                >
+                  Add expense
+                  <Plus size={18} />
+                </button>
+              </div>
+            </header>
+            <div className="expense-summary">
               <p>
-                Real calculations. Downloadable reports. This preview records
-                expenses locally; it doesn’t charge cards or issue
-                reimbursements.
+                <strong>{money(spent)}</strong> recorded against {money(budget)}{" "}
+                total budget.
+              </p>
+              <SpendBar spent={spent} budget={budget} />
+              <span>
+                Across {activePlans.length} active{" "}
+                {activePlans.length === 1 ? "outing" : "outings"}. Cancelled
+                outings are excluded from this overview; their records remain
+                below.
+              </span>
+            </div>
+            <div className="expense-tools">
+              <label className="field">
+                Show expenses for
+                <span className="select-control">
+                  <select
+                    aria-label="Filter expenses by outing"
+                    value={expenseFilter}
+                    onChange={(e) => setExpenseFilter(e.target.value)}
+                  >
+                    <option value="all">All outings</option>
+                    {demo.plans.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.title}
+                        {plan.status === "Cancelled" ? " (cancelled)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="select-chevron"
+                    size={12}
+                    aria-hidden="true"
+                  />
+                </span>
+              </label>
+              <p className="field-help">
+                Amounts in NGN · export follows your filter.
               </p>
             </div>
+            {demo.plans
+              .filter(
+                (plan) =>
+                  (expenseFilter === "all" || plan.id === expenseFilter) &&
+                  demo.expenses.some((expense) => expense.planId === plan.id),
+              )
+              .map((plan) => {
+                const records = visibleExpenses.filter(
+                    (expense) => expense.planId === plan.id,
+                  ),
+                  recorded = records.reduce(
+                    (sum, expense) => sum + expense.amount,
+                    0,
+                  );
+                return (
+                  <section className="expense-group" key={plan.id}>
+                    <header>
+                      <div>
+                        <h2>
+                          <a href={`#plan/${plan.id}`}>
+                            {plan.title}
+                            <ArrowRight size={19} />
+                          </a>
+                        </h2>
+                        <p>
+                          {dateLabel(plan.date)} · {plan.people} people
+                          {plan.status === "Cancelled"
+                            ? " · Cancelled"
+                            : plan.settledAt
+                              ? " · Settled"
+                              : ""}
+                        </p>
+                        <p className="group-estimate">
+                          Estimate {money(totalFor(plan))} total ·{" "}
+                          {money(experienceFor(plan.experienceId).price)} per
+                          person × {plan.people}
+                        </p>
+                      </div>
+                      <div className="group-spend">
+                        <span>
+                          Recorded {money(recorded)} total / Budget{" "}
+                          {money(plan.budget)} total
+                        </span>
+                        <SpendBar spent={recorded} budget={plan.budget} />
+                      </div>
+                    </header>
+                    <ExpenseLedger expenses={records} />
+                  </section>
+                );
+              })}
+            {!visibleExpenses.length && (
+              <div className="empty-state">
+                <ReceiptText size={40} strokeWidth={1} />
+                <h2>Start a clear record.</h2>
+                <p>Record an expense against an approved outing.</p>
+                <button
+                  className="text-button"
+                  onClick={() => setDialog({ type: "expense" })}
+                >
+                  Add expense
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            )}
+            <p className="field-help page-footnote">
+              Expense records only. No card is charged and no reimbursement is
+              initiated.
+            </p>
           </section>
         )}
       </main>
       <footer className="site-footer page-width">
-        <Brand />
-        <p>A little less admin. A little more together.</p>
-        <button onClick={() => setDialog({ type: "about" })}>
-          Made for good company <ArrowUpRight size={15} />
-        </button>
-      </footer>
-      {toast && (
-        <div className="toast" role="status">
-          <Check size={18} />
-          <span>{toast}</span>
-          <button
-            aria-label="Dismiss notification"
-            onClick={() => setToast("")}
-          >
-            <X size={15} />
+        <span>Time together. Well spent.</span>
+        <div>
+          <button onClick={() => setDialog({ type: "about" })}>
+            About this preview
+          </button>
+          <button onClick={() => setDialog({ type: "reset" })}>
+            Reset preview
           </button>
         </div>
-      )}
-
-      {dialog?.type === "experience" &&
-        (() => {
-          const experience = experienceFor(dialog.id);
-          return (
-            <Modal title="A CLOSER LOOK" onClose={() => setDialog(null)} wide>
-              <div className="experience-detail">
-                <ExperienceArt experience={experience} />
-                <div>
-                  <span className="eyebrow">
-                    {experience.category.toUpperCase()} / SAMPLE EXPERIENCE
-                  </span>
-                  <h2>{experience.name}</h2>
-                  <p>{experience.description}</p>
-                  <div className="detail-facts">
-                    <span>
-                      <MapPin size={16} />
-                      {experience.area}
-                    </span>
-                    <span>
-                      <Clock3 size={16} />
-                      {experience.duration}
-                    </span>
-                    <span>
-                      <Users size={16} />
-                      Up to {experience.capacity} people
-                    </span>
-                  </div>
-                  <h3>The good stuff, included</h3>
-                  <ul className="check-list">
-                    {experience.includes.map((item) => (
-                      <li key={item}>
-                        <Check size={15} />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="detail-bottom">
-                    <span>
-                      <strong>{money(experience.price)}</strong> / person,
-                      estimated
-                    </span>
-                    <button
-                      className="button button-dark"
-                      onClick={() =>
-                        setDialog({
-                          type: "create",
-                          experienceId: experience.id,
-                        })
-                      }
-                    >
-                      Make it our plan <ArrowUpRight size={17} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </Modal>
-          );
-        })()}
-      {dialog?.type === "create" && (
-        <CreatePlan
-          initialExperienceId={dialog.experienceId}
-          existing={demo.plans.find((plan) => plan.id === dialog.editId)}
-          brief={brief}
-          onClose={() => setDialog(null)}
-          onCreate={(plan) => {
-            setDemo((current) => ({
-              ...current,
-              plans: current.plans.some((item) => item.id === plan.id)
-                ? current.plans.map((item) =>
-                    item.id === plan.id ? plan : item,
-                  )
-                : [plan, ...current.plans],
-            }));
-            setDialog({ type: "plan", id: plan.id });
-            setBrief("");
-            setToast("A little idea, now a real plan.");
+        <span>Teamfare © {year}</span>
+      </footer>
+      <div
+        className={`toast ${toast ? "toast-visible" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        {toast}
+        <button
+          onClick={() => {
+            setToast("");
+            main.current?.focus({ preventScroll: true });
           }}
-        />
-      )}
-      {dialog?.type === "plan" &&
-        (() => {
-          const plan = demo.plans.find((item) => item.id === dialog.id);
-          if (!plan) return null;
-          return (
-            <PlanDetail
-              plan={plan}
-              expensesTotal={demo.expenses
-                .filter((expense) => expense.planId === plan.id)
-                .reduce((sum, expense) => sum + expense.amount, 0)}
-              role={role}
-              onClose={() => setDialog(null)}
-              onStatus={(status) => updatePlan(plan.id, status)}
-              onRSVP={() => rsvp(plan.id)}
-              onEdit={() => setDialog({ type: "create", editId: plan.id })}
-              onExpense={() => setDialog({ type: "expense", planId: plan.id })}
-              onCancel={() => setDialog({ type: "cancel", id: plan.id })}
-            />
-          );
-        })()}
+          aria-label="Dismiss notification"
+        >
+          <X size={16} />
+        </button>
+      </div>
       {dialog?.type === "expense" && (
         <ExpenseForm
           plans={demo.plans}
           defaultPlanId={dialog.planId}
           onClose={() => setDialog(null)}
-          onSubmit={(expense) => {
-            setDemo((current) => ({
-              ...current,
-              expenses: [expense, ...current.expenses],
-            }));
-            setDialog(null);
-            navigate("expenses");
-            setToast("Expense recorded. The tab is up to date.");
-          }}
+          onSubmit={addExpense}
         />
       )}
+      {dialog?.type === "experience" && (
+        <Modal title="Experience details" wide onClose={() => setDialog(null)}>
+          <div className="experience-detail">
+            <ExperienceArt experience={dialog.experience} />
+            <div>
+              <span className="eyebrow">{dialog.experience.category}</span>
+              <h2>{dialog.experience.name}</h2>
+              <p>{dialog.experience.description}</p>
+              <p>
+                {dialog.experience.area} · {dialog.experience.duration}
+              </p>
+              <ul>
+                {dialog.experience.includes.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <strong className="detail-price">
+                {money(dialog.experience.price)} per person
+              </strong>
+              <p className="field-help">
+                Sample experience, estimated price. No live availability or
+                booking.
+              </p>
+              <button
+                className="button button-dark"
+                onClick={() =>
+                  start(
+                    {
+                      brief: "",
+                      people: 8,
+                      date: localDate(8),
+                      location: dialog.experience.area,
+                      perPerson: dialog.experience.price + 2500,
+                    },
+                    dialog.experience.id,
+                  )
+                }
+              >
+                Start a plan
+                <ArrowRight size={18} />
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {dialog?.type === "cancel" && (
-        <Modal title="CANCEL THIS OUTING" onClose={() => setDialog(null)}>
-          <h2>
-            A change of <em>plans.</em>
-          </h2>
+        <Modal title="Cancel outing" onClose={() => setDialog(null)}>
+          <h2>Cancel this outing?</h2>
           <p className="modal-description">
-            Cancel this sample outing? Existing expense records will be kept. No
-            messages or refunds are sent from the preview.
+            It will leave Upcoming. Recorded expenses and activity will remain.
+            No external venue booking is affected.
           </p>
           <div className="form-actions">
             <button
               className="button button-outline"
               onClick={() => setDialog(null)}
             >
-              Keep the outing
+              Keep outing
             </button>
             <button
               className="button button-dark"
               onClick={() => {
-                updatePlan(dialog.id, "Cancelled");
+                const plan = demo.plans.find((item) => item.id === dialog.id)!;
+                savePlan({
+                  ...plan,
+                  status: "Cancelled",
+                  events: [
+                    ...(plan.events ?? []),
+                    event(
+                      `${role === "manager" ? "Nadia" : "Akin"} cancelled the outing.`,
+                    ),
+                  ],
+                });
                 setDialog(null);
+                navigate("plans");
+                setPlanFilter("Upcoming");
+                setToast("Outing cancelled. Expense records are kept.");
               }}
             >
               Cancel outing
@@ -1070,97 +804,37 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {dialog?.type === "people" && (
-        <Modal title="OUR PEOPLE" onClose={() => setDialog(null)}>
-          <h2>
-            Good company,
-            <br />
-            <em>all accounted for.</em>
-          </h2>
-          <p className="modal-description">
-            Eight sample teammates. Plenty of different ideas of a good time.
-          </p>
-          <div className="people-list">
-            {members.map((member) => (
-              <div key={member.id}>
-                <span className="avatar" style={{ background: member.color }}>
-                  {member.initials}
-                </span>
-                <div>
-                  <strong>{member.name}</strong>
-                  <span>{member.team}</span>
-                </div>
-                {member.id === "akin" && <span className="you-label">YOU</span>}
-              </div>
-            ))}
-          </div>
-          <label className="field">
-            Akin’s dining preference
-            <select
-              value={demo.preference}
-              onChange={(event) =>
-                setDemo((current) => ({
-                  ...current,
-                  preference: event.target.value,
-                }))
-              }
-            >
-              {[
-                "No preference",
-                "Vegetarian",
-                "Vegan",
-                "Halal",
-                "Pescatarian",
-              ].map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </label>
-          <p className="field-help">
-            Saved for this preview. Preferences still need confirmation with any
-            real venue.
-          </p>
-        </Modal>
-      )}
       {dialog?.type === "about" && (
-        <Modal
-          title="A NOTE ABOUT THIS PREVIEW"
-          onClose={() => setDialog(null)}
-        >
-          <span className="big-asterisk" aria-hidden="true">
-            ✳
-          </span>
+        <Modal title="About this preview" onClose={() => setDialog(null)}>
           <h2>
-            Good things
+            Good company.
             <br />
-            <em>start somewhere.</em>
+            Less coordination.
           </h2>
           <p className="modal-description">
-            This is Teamfare’s interactive product preview. Explore sample
-            experiences, create an outing, try manager approvals, RSVP, record
-            expenses, and download a CSV.
+            Teamfare brings outing plans, approvals, RSVPs and expenses into one
+            place. This preview uses sample experiences and fictional teammates,
+            with changes saved in your browser.
           </p>
-          <p className="modal-description">
-            Your changes are stored in this browser. Venue discovery uses a
-            sample catalogue; no AI service, live availability, bookings,
-            emails, or payments are connected yet.
+          <p>
+            AI research, authentication, venue bookings, invitations, payments
+            and cloud services are not connected. The manager switch is for
+            exploring the local workflow.
           </p>
           <button
-            className="button button-outline"
-            onClick={() => setDialog({ type: "reset" })}
+            className="button button-dark modal-done"
+            onClick={() => setDialog(null)}
           >
-            Reset sample data <ArrowRight size={17} />
+            Back to Teamfare
           </button>
         </Modal>
       )}
       {dialog?.type === "reset" && (
-        <Modal title="START FRESH" onClose={() => setDialog(null)}>
-          <h2>
-            A fresh <em>page.</em>
-          </h2>
+        <Modal title="Reset preview" onClose={() => setDialog(null)}>
+          <h2>A fresh start?</h2>
           <p className="modal-description">
-            Reset the preview to its original sample plans, expenses, and
-            favourites? This removes changes you’ve made in this browser.
+            This removes your local plans, saved ideas, preferences and
+            expenses, then restores the sample outings.
           </p>
           <div className="form-actions">
             <button
@@ -1173,8 +847,12 @@ export default function App() {
               className="button button-dark"
               onClick={() => {
                 setDemo(structuredClone(initialDemo));
+                setRole("employee");
+                setPlanFilter("auto");
+                setExpenseFilter("all");
                 setDialog(null);
-                setToast("Back to the beginning. Make something good.");
+                navigate("home");
+                setToast("Preview reset.");
               }}
             >
               Reset preview
@@ -1182,216 +860,46 @@ export default function App() {
           </div>
         </Modal>
       )}
-    </>
-  );
-}
-function StatusLabel({ status }: { status: Status }) {
-  return (
-    <span
-      className={`status-label status-${status.toLowerCase().replaceAll(" ", "-")}`}
-    >
-      <span />
-      {status}
-    </span>
-  );
-}
-function PlanDetail({
-  plan,
-  expensesTotal,
-  role,
-  onClose,
-  onStatus,
-  onRSVP,
-  onEdit,
-  onExpense,
-  onCancel,
-}: {
-  plan: Plan;
-  expensesTotal: number;
-  role: string;
-  onClose: () => void;
-  onStatus: (status: Status) => void;
-  onRSVP: () => void;
-  onEdit: () => void;
-  onExpense: () => void;
-  onCancel: () => void;
-}) {
-  const experience = experienceFor(plan.experienceId),
-    estimate = experience.price * plan.people;
-  return (
-    <Modal title="THE PLAN" onClose={onClose} wide>
-      <div className="plan-detail-heading">
-        <div>
-          <StatusLabel status={plan.status} />
-          <h2>{plan.title}</h2>
-          <p>
-            {experience.name} · {experience.area}
+      {dialog?.type === "people" && (
+        <Modal title="Team preferences" onClose={() => setDialog(null)}>
+          <h2>Your team, considered.</h2>
+          <p className="modal-description">
+            Eight sample teammates. Preferences are saved here for planning;
+            they are not sent to a venue.
           </p>
-        </div>
-        <span className="date-block">
-          <strong>{dateLabel(plan.date, { day: "2-digit" })}</strong>
-          <span>{dateLabel(plan.date, { month: "short" })}</span>
-        </span>
-      </div>
-      <div className="plan-detail-body">
-        <div>
-          <div className="detail-facts">
-            <span>
-              <CalendarDays size={17} />
-              {dateLabel(plan.date, {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-              })}
-            </span>
-            <span>
-              <Clock3 size={17} />
-              {plan.time} · {experience.duration}
-            </span>
-            <span>
-              <Users size={17} />
-              {plan.people} people
-            </span>
-          </div>
-          <h3>A note for the team</h3>
-          <p className="plan-note">
-            {plan.note || "Come as you are. Leave the laptop behind."}
-          </p>
-          <h3>
-            The guest list{" "}
-            <span className="muted">/ {plan.going.length} going</span>
-          </h3>
-          <div className="guest-list">
-            {plan.attendees.map((id) => {
-              const member = members.find((person) => person.id === id)!;
-              return (
-                <div key={id}>
-                  <span className="avatar" style={{ background: member.color }}>
-                    {member.initials}
-                  </span>
-                  <span>{member.name}</span>
-                  {plan.going.includes(id) ? (
-                    <span className="guest-rsvp">
-                      <Check size={13} />
-                      Going
-                    </span>
-                  ) : (
-                    <span className="muted">Invited</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {plan.people > plan.attendees.length && (
-            <p className="field-help">
-              {plan.people - plan.attendees.length} additional guest places
-              planned.
-            </p>
-          )}
-          {plan.status === "Approved" &&
-            plan.attendees.includes("akin") &&
-            role === "employee" && (
-              <button
-                className={`button ${plan.going.includes("akin") ? "button-outline" : "button-dark"}`}
-                onClick={onRSVP}
-              >
-                {plan.going.includes("akin") ? "Change my RSVP" : "Count me in"}
-                <Check size={17} />
-              </button>
-            )}
-        </div>
-        <aside className="plan-budget">
-          <span className="eyebrow">LET’S KEEP THE TAB TIDY</span>
-          <h3>The numbers.</h3>
-          <dl>
-            <div>
-              <dt>Estimated experience</dt>
-              <dd>{money(estimate)}</dd>
-            </div>
-            <div>
-              <dt>Planned budget</dt>
-              <dd>{money(plan.budget)}</dd>
-            </div>
-            <div>
-              <dt>Recorded expenses</dt>
-              <dd>{money(expensesTotal)}</dd>
-            </div>
-            <div
-              className={
-                plan.budget < estimate ? "over-budget" : "budget-remainder"
+          <label className="field">
+            Dietary preference
+            <select
+              value={demo.preference}
+              onChange={(e) =>
+                setDemo((current) => ({
+                  ...current,
+                  preference: e.target.value,
+                }))
               }
             >
-              <dt>
-                {plan.budget < estimate
-                  ? "Above budget by"
-                  : "Room in the budget"}
-              </dt>
-              <dd>{money(Math.abs(plan.budget - estimate))}</dd>
-            </div>
-          </dl>
-          <p>
-            Estimates are planning figures. Your team’s actual costs may change.
-          </p>
-          {plan.status === "Awaiting approval" && role === "manager" && (
-            <div className="stack-buttons">
-              <button
-                className="button button-dark"
-                disabled={estimate > plan.budget}
-                onClick={() => onStatus("Approved")}
-              >
-                Give it the go-ahead <Check size={16} />
-              </button>
-              {estimate > plan.budget && (
-                <p className="error-text">
-                  The estimate exceeds this budget. Request changes before
-                  approving.
-                </p>
-              )}
-              <button
-                className="button button-outline"
-                onClick={() => onStatus("Changes requested")}
-              >
-                Request changes
-              </button>
-            </div>
-          )}
-          {["Draft", "Changes requested"].includes(plan.status) && (
-            <>
-              <button className="button button-dark" onClick={onEdit}>
-                Edit the details <ArrowUpRight size={16} />
-              </button>
-              <button
-                className="button button-outline"
-                disabled={plan.budget < estimate}
-                onClick={() => onStatus("Awaiting approval")}
-              >
-                Send for approval <ArrowRight size={16} />
-              </button>
-            </>
-          )}
-          {plan.status === "Awaiting approval" && role === "employee" && (
-            <p className="waiting-note">
-              <Clock3 size={17} />
-              With Nadia for review. Try the manager view from your profile.
-            </p>
-          )}
-          {plan.status === "Approved" && (
-            <button className="button button-outline" onClick={onExpense}>
-              <Plus size={16} />
-              Record an expense
-            </button>
-          )}
-          {plan.status !== "Cancelled" && (
-            <button className="cancel-plan" onClick={onCancel}>
-              Cancel this outing
-            </button>
-          )}
-        </aside>
-      </div>
-      <div className="dialog-footnote">
-        Sample plan · RSVPs and approvals stay in this browser. No invitations
-        or venue bookings are sent.
-      </div>
-    </Modal>
+              <option>No preference</option>
+              <option>Vegetarian options</option>
+              <option>Vegan options</option>
+              <option>Halal options</option>
+            </select>
+          </label>
+          <div className="preference-people">
+            {members.map((member) => (
+              <span key={member.id}>
+                <span className="monogram">{member.initials}</span>
+                {member.name}
+              </span>
+            ))}
+          </div>
+          <button
+            className="button button-dark"
+            onClick={() => setDialog(null)}
+          >
+            Done
+          </button>
+        </Modal>
+      )}
+    </>
   );
 }

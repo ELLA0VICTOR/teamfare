@@ -6,11 +6,13 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  drawer = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  drawer?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -28,9 +30,26 @@ export function Modal({
   return (
     <dialog
       ref={dialog}
-      className={`modal ${wide ? "modal-wide" : ""}`}
+      className={`modal ${wide ? "modal-wide" : ""} ${drawer ? "modal-drawer" : ""}`}
       aria-label={title}
       onCancel={onClose}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const focusable = Array.from(
+          event.currentTarget.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
+          ),
+        ).filter((element) => element.getClientRects().length > 0);
+        const first = focusable[0],
+          last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           const rect = event.currentTarget.getBoundingClientRect();
@@ -45,7 +64,7 @@ export function Modal({
       }}
     >
       <div className="modal-top">
-        <span className="eyebrow">TEAMFARE / {title}</span>
+        <span className="modal-label">Teamfare / {title}</span>
         <button
           className="icon-button"
           onClick={onClose}

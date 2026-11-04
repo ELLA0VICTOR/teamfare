@@ -33,6 +33,16 @@ export type Plan = {
   note: string;
   attendees: string[];
   going: string[];
+  location?: string;
+  reviewNote?: string;
+  declined?: string[];
+  events?: PlanEvent[];
+  settledAt?: string;
+};
+export type PlanEvent = {
+  id: string;
+  at: string;
+  text: string;
 };
 export type Expense = {
   id: string;
@@ -136,7 +146,7 @@ export const experiences: Experience[] = [
     area: "Lekki, Lagos",
     price: 22000,
     duration: "2 hours",
-    artwork: "clay",
+    image: "/images/pottery.jpg",
     capacity: 12,
     description:
       "Trade your keyboard for a lump of clay. A relaxed, beginner-friendly making session where the slightly wonky mug is usually everyone’s favourite.",
@@ -155,7 +165,7 @@ export const experiences: Experience[] = [
     area: "Ikoyi, Lagos",
     price: 12000,
     duration: "90 minutes",
-    artwork: "court",
+    image: "/images/tennis.jpg",
     capacity: 16,
     description:
       "Fresh air, easy rallies, and a little team spirit. Mix up your doubles partners, learn the basics, and leave the competitive spreadsheets at your desk.",
@@ -265,7 +275,14 @@ export function loadDemo(): Demo {
       "saved" in data &&
       Array.isArray(data.saved)
     )
-      return data as Demo;
+      return {
+        ...(data as Demo),
+        plans: (data as Demo).plans.map((plan) => ({
+          ...plan,
+          declined: plan.declined ?? [],
+          events: plan.events ?? [],
+        })),
+      };
   } catch {
     /* Unavailable storage starts a fresh preview. */
   }
