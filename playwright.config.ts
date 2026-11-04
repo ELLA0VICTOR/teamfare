@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  outputDir: "./test-results/preview",
+  testIgnore: "**/live/**",
   fullyParallel: true,
   workers: 2,
   timeout: 30000,
@@ -16,7 +18,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 5176 --strictPort",
+    command: "npm run dev:web -- --host 127.0.0.1 --port 5176 --strictPort",
     url: "http://127.0.0.1:5176",
     reuseExistingServer: !process.env.CI,
   },

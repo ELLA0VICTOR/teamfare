@@ -73,3 +73,12 @@ crash.log
 *.temp
 Thumbs.db
 Desktop.ini
+
+# Server runtime data and database backups
+/data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-wal
+*.db-shm
+/backups/

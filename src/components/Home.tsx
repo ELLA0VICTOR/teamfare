@@ -6,6 +6,7 @@ import type { Category, Demo, Experience } from "../data";
 import { needsYou, placeFor } from "../plan";
 import type { Role } from "../plan";
 import { ExperienceArt } from "./ExperienceArt";
+import { useTeam } from "../team-context";
 
 export type ComposerValues = {
   brief: string;
@@ -35,6 +36,7 @@ export function Home({
   onSaveIdea: (id: string) => void;
   onExplore: (experience: Experience) => void;
 }) {
+  const { live, viewerId } = useTeam();
   const [brief, setBrief] = useState("");
   const [people, setPeople] = useState("8");
   const [location, setLocation] = useState("Lagos");
@@ -45,7 +47,7 @@ export function Home({
     "All experiences",
   );
   const urgent = demo.plans
-    .filter((plan) => needsYou(plan, role))
+    .filter((plan) => needsYou(plan, role, live ? viewerId : "akin"))
     .sort(
       (a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
     );
@@ -63,7 +65,9 @@ export function Home({
   const nextExperience =
     experiences.find((item) => item.id === nextPlan?.experienceId) ??
     experiences[0];
-  const isYourMove = nextPlan ? needsYou(nextPlan, role) : false;
+  const isYourMove = nextPlan
+    ? needsYou(nextPlan, role, live ? viewerId : "akin")
+    : false;
   const nextLabel = !nextPlan
     ? "Plan this"
     : !isYourMove

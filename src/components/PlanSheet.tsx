@@ -13,12 +13,12 @@ import {
   experienceFor,
   experiences,
   localDate,
-  members,
   money,
 } from "../data";
 import type { Expense, Plan } from "../data";
-import { event, needsYou, placeFor } from "../plan";
+import { event, needsYou, placeFor, priceFor } from "../plan";
 import type { Role } from "../plan";
+import { useTeam } from "../team-context";
 import { RouteLine } from "./RouteLine";
 import { ExpenseLedger } from "./ExpenseLedger";
 
@@ -35,15 +35,24 @@ export function PlanSheet({
   plan: Plan;
   expenses: Expense[];
   role: Role;
-  onSave: (plan: Plan) => void;
+  onSave: (plan: Plan) => void | boolean | Promise<boolean>;
   onRsvp: (going: boolean) => void;
   onExpense: () => void;
   onCancel: () => void;
   announce: (text: string) => void;
 }) {
+  const { live, viewerId, viewerName, managerName, members } = useTeam();
+  const actor = live ? viewerName : role === "manager" ? "Nadia" : "Akin";
+  const managerLabel = live ? managerName : "Nadia";
+  const creatorName =
+    members.find((member) => member.id === plan.createdBy)?.name ?? "Akin Cole";
   const editable =
-    role === "employee" && ["Draft", "Changes requested"].includes(plan.status);
-  const review = role === "manager" && plan.status === "Awaiting approval";
+    (live ? plan.createdBy === viewerId : role === "employee") &&
+    ["Draft", "Changes requested"].includes(plan.status);
+  const review =
+    role === "manager" &&
+    plan.status === "Awaiting approval" &&
+    (!live || plan.createdBy !== viewerId);
   const [values, setValues] = useState(() => ({
     ...plan,
     location: placeFor(plan),
@@ -53,15 +62,16 @@ export function PlanSheet({
   const [error, setError] = useState("");
   const shown = editable ? values : plan;
   const experience = experienceFor(shown.experienceId);
-  const total = experience.price * shown.people;
+  const unitPrice = priceFor(shown);
+  const total = unitPrice * shown.people;
   const difference = shown.budget - total;
   const spent = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const isGoing = plan.going.includes("akin"),
-    declined = plan.declined?.includes("akin");
+  const isGoing = plan.going.includes(live ? viewerId : "akin"),
+    declined = plan.declined?.includes(live ? viewerId : "akin");
   function change<K extends keyof Plan>(key: K, value: Plan[K]) {
     setValues((current) => ({ ...current, [key]: value }));
   }
-  function save(e: FormEvent<HTMLFormElement>) {
+  async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     const status =
@@ -93,10 +103,21 @@ export function PlanSheet({
       );
       return;
     }
-    const attendees = members
-      .slice(0, Math.min(values.people, members.length))
-      .map((member) => member.id);
-    onSave({
+    const attendees = live
+      ? values.attendees
+      : members
+          .slice(0, Math.min(values.people, members.length))
+          .map((member) => member.id);
+    if (
+      live &&
+      (attendees.length > values.people || !attendees.includes(viewerId))
+    ) {
+      setError(
+        "Choose no more teammates than the headcount, and include yourself.",
+      );
+      return;
+    }
+    const saved = await onSave({
       ...values,
       title: values.title.trim(),
       location: values.location!.trim(),
@@ -108,42 +129,47 @@ export function PlanSheet({
         ...(plan.events ?? []),
         event(
           status === "Draft"
-            ? "Akin saved the draft."
-            : "Akin sent the plan to Nadia for approval.",
+            ? `${actor} saved the draft.`
+            : `${actor} sent the plan to ${managerLabel} for approval.`,
         ),
       ],
     });
+    if (saved === false) return;
     announce(
-      status === "Draft" ? "Draft saved." : "Sent to Nadia for approval.",
+      status === "Draft"
+        ? "Draft saved."
+        : `Sent to ${managerLabel} for approval.`,
     );
   }
-  function approve() {
+  async function approve() {
     if (total > plan.budget) return;
-    onSave({
+    const saved = await onSave({
       ...plan,
       status: "Approved",
       events: [
         ...(plan.events ?? []),
-        event("Nadia approved the plan. No invitations were sent."),
+        event(`${actor} approved the plan. No invitations were sent.`),
       ],
     });
+    if (saved === false) return;
     announce("Plan approved. Invitations have not been sent.");
   }
-  function request(e: FormEvent<HTMLFormElement>) {
+  async function request(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!reviewNote.trim()) {
       setError("Add a note so the organiser knows what to change.");
       return;
     }
-    onSave({
+    const saved = await onSave({
       ...plan,
       status: "Changes requested",
       reviewNote: reviewNote.trim(),
       events: [
         ...(plan.events ?? []),
-        event(`Nadia requested changes: ${reviewNote.trim()}`),
+        event(`${actor} requested changes: ${reviewNote.trim()}`),
       ],
     });
+    if (saved === false) return;
     announce("Changes requested. Your note is saved with the plan.");
     setRequesting(false);
     setError("");
@@ -165,7 +191,7 @@ export function PlanSheet({
           <div className="review-heading">
             <span className="attention-marker" />
             <h2 id="review-heading">For your approval</h2>
-            <span>Proposed by Akin Cole</span>
+            <span>Proposed by {creatorName}</span>
           </div>
           <dl className="review-facts">
             <div>
@@ -182,7 +208,7 @@ export function PlanSheet({
               <dt>Estimated cost</dt>
               <dd>
                 {money(total)} total
-                <small>{money(experience.price)} per person</small>
+                <small>{money(unitPrice)} per person</small>
               </dd>
             </div>
             <div>
@@ -255,7 +281,7 @@ export function PlanSheet({
         <div className="sheet-kicker">
           The plan sheet
           <span
-            className={`status-text ${needsYou(plan, role) ? "needs-action" : plan.status === "Approved" ? "is-approved" : ""}`}
+            className={`status-text ${needsYou(plan, role, live ? viewerId : "akin") ? "needs-action" : plan.status === "Approved" ? "is-approved" : ""}`}
           >
             <i />
             {plan.settledAt ? "Settled" : plan.status}
@@ -284,9 +310,9 @@ export function PlanSheet({
         <RouteLine plan={plan} />
         <p className="status-sentence">
           {plan.status === "Awaiting approval"
-            ? "Waiting for Nadia Bello to approve."
+            ? `Waiting for ${live ? managerName : "Nadia Bello"} to approve.`
             : plan.status === "Changes requested"
-              ? "Nadia requested a few changes. Update the draft and send it back."
+              ? `${managerLabel} requested changes. Update the draft and send it back.`
               : plan.status === "Draft"
                 ? "Your idea is taking shape. Refine the details before review."
                 : plan.status === "Cancelled"
@@ -306,8 +332,8 @@ export function PlanSheet({
               <div>
                 <strong>
                   {plan.status === "Changes requested"
-                    ? "Changes from Nadia"
-                    : "Last review note from Nadia"}
+                    ? `Changes from ${managerLabel}`
+                    : `Last review note from ${managerLabel}`}
                 </strong>
                 <p>{plan.reviewNote}</p>
               </div>
@@ -340,6 +366,7 @@ export function PlanSheet({
                           ...current,
                           experienceId: next.id,
                           location: next.area,
+                          unitPrice: next.price,
                         }));
                       }}
                     >
@@ -417,6 +444,36 @@ export function PlanSheet({
                     />
                   </label>
                 </div>
+                {live && (
+                  <fieldset className="guest-picker">
+                    <legend>Who is invited?</legend>
+                    <p className="field-help">
+                      Choose teammates for the guest list. No invitations are
+                      emailed yet.
+                    </p>
+                    {members.map((member) => (
+                      <label key={member.id}>
+                        <input
+                          type="checkbox"
+                          checked={values.attendees.includes(member.id)}
+                          disabled={member.id === viewerId}
+                          onChange={(e) =>
+                            change(
+                              "attendees",
+                              e.target.checked
+                                ? [...values.attendees, member.id]
+                                : values.attendees.filter(
+                                    (id) => id !== member.id,
+                                  ),
+                            )
+                          }
+                        />
+                        {member.name}
+                        {member.id === viewerId ? " (you)" : ""}
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
                 {error && (
                   <p className="form-error" role="alert">
                     {error}
@@ -473,7 +530,7 @@ export function PlanSheet({
                 <dt>
                   {experience.name}
                   <small>
-                    {money(experience.price)} per person × {shown.people}
+                    {money(unitPrice)} per person × {shown.people}
                   </small>
                 </dt>
                 <dd>{money(total)} total</dd>
@@ -528,9 +585,7 @@ export function PlanSheet({
                     <div>
                       <strong>
                         {member.name}
-                        {id === (role === "manager" ? "nadia" : "akin")
-                          ? " (you)"
-                          : ""}
+                        {id === viewerId ? " (you)" : ""}
                       </strong>
                       <small>{member.team}</small>
                     </div>
@@ -540,8 +595,8 @@ export function PlanSheet({
                       <i />
                       {going ? "Going" : no ? "Not going" : "Not replied"}
                     </span>
-                    {id === "akin" &&
-                      role === "employee" &&
+                    {id === (live ? viewerId : "akin") &&
+                      (live || role === "employee") &&
                       plan.status === "Approved" &&
                       !plan.settledAt &&
                       plan.date >= localDate() && (
@@ -568,8 +623,9 @@ export function PlanSheet({
             </div>
             {shown.people > plan.attendees.length && (
               <p className="field-help">
-                {plan.attendees.length} named teammates in this preview;
-                planning for {shown.people} people. No invitations are sent.
+                {plan.attendees.length} named teammates
+                {live ? "" : " in this preview"}; planning for {shown.people}{" "}
+                people. No invitations are sent.
               </p>
             )}
           </section>
@@ -590,7 +646,9 @@ export function PlanSheet({
           <section className="sheet-section">
             <div className="section-heading">
               <h2>Activity</h2>
-              <span>Recorded in this browser</span>
+              <span>
+                {live ? "Recorded by your team" : "Recorded in this browser"}
+              </span>
             </div>
             {plan.events?.length ? (
               <ol className="activity-list">
@@ -629,7 +687,7 @@ export function PlanSheet({
             <span className="rail-label">Estimated total</span>
             <strong className="rail-total">{money(total)}</strong>
             <span>
-              {money(experience.price)} per person · {shown.people} people
+              {money(unitPrice)} per person · {shown.people} people
             </span>
             <div className="rail-budget">
               <span>
@@ -651,7 +709,7 @@ export function PlanSheet({
                     ? "Add a name, date, place and people before sending."
                     : difference < 0
                       ? "The estimate is above your budget. Increase the budget, reduce the group, or save a draft."
-                      : "Ready for Nadia to review. You can still refine the details."}
+                      : `Ready for ${managerLabel} to review. You can still refine the details.`}
                 </p>
                 <button
                   form="plan-editor"
@@ -660,11 +718,13 @@ export function PlanSheet({
                   className="button button-dark full-width"
                   disabled={difference < 0 || !!missing}
                 >
-                  Send to Nadia for approval
+                  Send to {managerLabel} for approval
                   <ArrowRight size={16} />
                 </button>
                 <p className="field-help rail-preview">
-                  This records a review request locally. No email is sent.
+                  {live
+                    ? "Your manager can review this in Teamfare. No email is sent."
+                    : "This records a review request locally. No email is sent."}
                 </p>
               </>
             ) : plan.status === "Awaiting approval" ? (
@@ -672,7 +732,9 @@ export function PlanSheet({
                 <p className="field-help">
                   {review
                     ? "Review the proposal above. Your decision will appear in its activity history."
-                    : "Nadia’s approval is the next step. Use the account menu to try the manager view."}
+                    : live
+                      ? "A different manager must review this proposal."
+                      : "Nadia’s approval is the next step. Use the account menu to try the manager view."}
                 </p>
                 {review && (
                   <button
@@ -687,7 +749,7 @@ export function PlanSheet({
               </>
             ) : plan.status === "Approved" && !plan.settledAt ? (
               <>
-                {needsYou(plan, role) ? (
+                {needsYou(plan, role, live ? viewerId : "akin") ? (
                   <a
                     href="#people-section"
                     className="button button-dark"
@@ -714,15 +776,16 @@ export function PlanSheet({
                 {role === "manager" && plan.date < localDate() && (
                   <button
                     className="button button-outline"
-                    onClick={() => {
-                      onSave({
+                    onClick={async () => {
+                      const saved = await onSave({
                         ...plan,
                         settledAt: new Date().toISOString(),
                         events: [
                           ...(plan.events ?? []),
-                          event("Nadia marked expense recording complete."),
+                          event(`${actor} marked expense recording complete.`),
                         ],
                       });
+                      if (saved === false) return;
                       announce(
                         "Outing settled. Expense recording is now closed.",
                       );

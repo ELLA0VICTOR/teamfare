@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -30,15 +30,26 @@ import {
   storageKey,
 } from "./data";
 import type { Demo, Experience, Expense, Plan, View } from "./data";
-import { event, needsYou, nextAction, placeFor, totalFor } from "./plan";
+import {
+  event,
+  needsYou,
+  nextAction,
+  placeFor,
+  totalFor,
+  priceFor,
+} from "./plan";
 import type { Role } from "./plan";
 import "./App.css";
+import { api, ApiError } from "./api";
+import { TeamContext } from "./team-context";
+import type { Connection } from "./team-context";
+import type { Member } from "./team-context";
 
 type Dialog =
   | { type: "experience"; experience: Experience }
   | { type: "expense"; planId?: string }
   | { type: "cancel"; id: string }
-  | { type: "about" | "reset" | "people" }
+  | { type: "about" | "reset" | "people" | "invite" }
   | null;
 const navigation = [
   { view: "discover", label: "Home", icon: HomeIcon },
@@ -49,9 +60,39 @@ function currentRoute() {
   return window.location.hash.slice(1).split("?")[0] || "home";
 }
 
-export default function App() {
-  const [demo, setDemo] = useState<Demo>(loadDemo);
-  const [role, setRole] = useState<Role>("employee");
+export default function App({
+  connection,
+  onExit,
+}: {
+  connection?: Connection;
+  onExit: () => void;
+}) {
+  const live = !!connection;
+  const [demo, setDemo] = useState<Demo>(() => connection?.state ?? loadDemo());
+  const [previewRole, setRole] = useState<Role>("employee");
+  const role = connection?.user.role ?? previewRole;
+  const [teamMembers, setTeamMembers] = useState<Member[]>(
+    connection?.members ?? members,
+  );
+  const viewerId =
+    connection?.user.id ?? (role === "manager" ? "nadia" : "akin");
+  const viewerName =
+    connection?.user.name ?? (role === "manager" ? "Nadia Bello" : "Akin Cole");
+  const managerName = live
+    ? (teamMembers.find(
+        (member) => member.role === "manager" && member.id !== viewerId,
+      )?.name ?? "a manager")
+    : "Nadia Bello";
+  const teamName = connection?.team.name ?? "Koto team";
+  const [saving, setSaving] = useState(false),
+    [syncError, setSyncError] = useState(false);
+  const [invitation, setInvitation] = useState<{
+    code: string;
+    expiresAt: string;
+  } | null>(null);
+  const [inviteRole, setInviteRole] = useState<Role>("employee");
+  const mutationLock = useRef(false);
+  const refreshSequence = useRef(0);
   const [year] = useState(() => new Date().getFullYear());
   const [route, setRoute] = useState(currentRoute);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -64,7 +105,9 @@ export default function App() {
   const [expenseFilter, setExpenseFilter] = useState("all");
   const profile = useRef<HTMLDivElement>(null);
   const main = useRef<HTMLElement>(null);
-  const pending = demo.plans.filter((plan) => needsYou(plan, role)).length;
+  const pending = demo.plans.filter((plan) =>
+    needsYou(plan, role, live ? viewerId : "akin"),
+  ).length;
   const view: View = route.startsWith("plan")
     ? "plans"
     : route === "expenses"
@@ -79,7 +122,7 @@ export default function App() {
     (plan) =>
       currentFilter === "All" ||
       (currentFilter === "Needs you"
-        ? needsYou(plan, role)
+        ? needsYou(plan, role, live ? viewerId : "akin")
         : currentFilter === "Upcoming"
           ? plan.status === "Approved" &&
             !plan.settledAt &&
@@ -98,13 +141,14 @@ export default function App() {
     .reduce((sum, expense) => sum + expense.amount, 0);
 
   useEffect(() => {
+    if (live) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify(demo));
     } catch {
       // oxlint-disable-next-line react/set-state-in-effect -- Report failure from the external browser storage API.
       setStorageError(true);
     }
-  }, [demo]);
+  }, [demo, live]);
   useEffect(() => {
     const update = () => {
       setRoute(currentRoute());
@@ -145,13 +189,140 @@ export default function App() {
   function navigate(next: string) {
     window.location.hash = next;
   }
-  function savePlan(plan: Plan) {
-    setDemo((current) => ({
-      ...current,
-      plans: current.plans.map((item) => (item.id === plan.id ? plan : item)),
+  const refresh = useCallback(async () => {
+    if (!connection) return;
+    const sequence = ++refreshSequence.current;
+    const latest = await api<Connection>("/state");
+    if (sequence !== refreshSequence.current) return;
+    setDemo(latest.state);
+    setTeamMembers(latest.members);
+    setSyncError(false);
+  }, [connection]);
+  async function mutate<T>(
+    path: string,
+    body: unknown,
+    method = "POST",
+  ): Promise<T | undefined> {
+    if (!connection || mutationLock.current) return;
+    mutationLock.current = true;
+    setSaving(true);
+    try {
+      const result = await api<T>(path, body, connection.csrfToken, method);
+      await refresh();
+      return result;
+    } catch (error) {
+      setToast(
+        error instanceof Error
+          ? error.message
+          : "The change could not be saved.",
+      );
+      if (error instanceof ApiError && error.status === 401) onExit();
+      else {
+        try {
+          await refresh();
+        } catch {
+          setSyncError(true);
+        }
+      }
+      return;
+    } finally {
+      mutationLock.current = false;
+      setSaving(false);
+    }
+  }
+  useEffect(() => {
+    if (!connection) return;
+    const sync = () => {
+      if (document.visibilityState !== "hidden" && !mutationLock.current)
+        void refresh().catch((error) => {
+          if (error instanceof ApiError && error.status === 401) onExit();
+          else setSyncError(true);
+        });
+    };
+    const timer = setInterval(sync, 10000);
+    sync();
+    window.addEventListener("focus", sync);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", sync);
+    };
+  }, [connection, refresh, onExit, route]);
+  async function savePlan(plan: Plan) {
+    if (!live) {
+      setDemo((current) => ({
+        ...current,
+        plans: current.plans.map((item) => (item.id === plan.id ? plan : item)),
+      }));
+      return true;
+    }
+    const previous = demo.plans.find((item) => item.id === plan.id)!;
+    if (
+      ["Draft", "Changes requested"].includes(previous.status) &&
+      ["Draft", "Awaiting approval"].includes(plan.status)
+    ) {
+      const result = await mutate<Plan>(
+        `/plans/${plan.id}`,
+        {
+          experienceId: plan.experienceId,
+          title: plan.title,
+          date: plan.date,
+          time: plan.time,
+          people: plan.people,
+          budget: plan.budget,
+          location: placeFor(plan),
+          note: plan.note,
+          attendees: plan.attendees,
+          revision: plan.revision,
+          submit: plan.status === "Awaiting approval",
+        },
+        "PUT",
+      );
+      return !!result;
+    }
+    const action =
+      plan.status === "Cancelled"
+        ? "cancel"
+        : plan.settledAt
+          ? "settle"
+          : plan.status === "Approved"
+            ? "approve"
+            : "request-changes";
+    return !!(await mutate(`/plans/${plan.id}/action`, {
+      action,
+      revision: plan.revision,
+      ...(action === "request-changes" ? { note: plan.reviewNote } : {}),
     }));
   }
-  function start(
+  async function saveIdea(id: string) {
+    if (live) {
+      await mutate(`/saved/${id}`, { saved: !demo.saved.includes(id) }, "PUT");
+      return;
+    }
+    setDemo((current) => ({
+      ...current,
+      saved: current.saved.includes(id)
+        ? current.saved.filter((item) => item !== id)
+        : [...current.saved, id],
+    }));
+  }
+  async function preference(value: string) {
+    if (live) {
+      await mutate("/preferences", { preference: value }, "PUT");
+      return;
+    }
+    setDemo((current) => ({ ...current, preference: value }));
+  }
+  async function signOut() {
+    if (mutationLock.current) return;
+    try {
+      await api("/auth/logout", {}, connection!.csrfToken);
+      onExit();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onExit();
+      else setToast("Sign out could not be completed. Please try again.");
+    }
+  }
+  async function start(
     values: ComposerValues = {
       brief: "",
       people: 8,
@@ -186,12 +357,46 @@ export default function App() {
       declined: [],
       events: [event("Akin created the draft.")],
     };
+    if (live) {
+      const created = await mutate<Plan>("/plans", {
+        experienceId: chosen,
+        title: plan.title,
+        date: plan.date,
+        time: plan.time,
+        people: plan.people,
+        budget: plan.budget,
+        location: values.location,
+        note: values.brief,
+        attendees: [
+          viewerId,
+          ...teamMembers
+            .filter((member) => member.id !== viewerId)
+            .map((member) => member.id),
+        ].slice(0, values.people),
+      });
+      if (created) {
+        setDialog(null);
+        navigate(`plan/${created.id}`);
+      }
+      return;
+    }
     setDemo((current) => ({ ...current, plans: [...current.plans, plan] }));
     setRole("employee");
     setDialog(null);
     navigate(`plan/${plan.id}`);
   }
-  function rsvp(plan: Plan, going: boolean) {
+  async function rsvp(plan: Plan, going: boolean) {
+    if (live) {
+      const result = await mutate<Plan>(`/plans/${plan.id}/rsvp`, {
+        going,
+        revision: plan.revision,
+      });
+      if (result)
+        setToast(
+          `RSVP updated. ${result.going.length} of ${result.people} people going.`,
+        );
+      return;
+    }
     if (
       role !== "employee" ||
       plan.status !== "Approved" ||
@@ -224,7 +429,15 @@ export default function App() {
       `RSVP updated. ${next.going.length} of ${next.people} people going.`,
     );
   }
-  function addExpense(expense: Expense) {
+  async function addExpense(expense: Expense) {
+    if (live) {
+      const { id: _id, ...fields } = expense;
+      if (await mutate("/expenses", fields)) {
+        setDialog(null);
+        setToast("Expense recorded. No payment was made.");
+      }
+      return;
+    }
     setDemo((current) => ({
       ...current,
       expenses: [...current.expenses, expense],
@@ -295,611 +508,741 @@ export default function App() {
     </a>
   ));
   return (
-    <>
-      <a
-        className="skip-link"
-        href="#main"
-        onClick={(e) => {
-          e.preventDefault();
-          main.current?.focus();
-        }}
-      >
-        Skip to content
-      </a>
-      <header className="site-header">
-        <div className="header-inner">
-          <a href="#home" aria-label="Teamfare home" className="brand-link">
-            <Brand />
-          </a>
-          <nav className="main-nav" aria-label="Main navigation">
-            {navLinks}
-          </nav>
-          <div className="account" ref={profile}>
-            <span className="team-name">Koto team</span>
-            <button
-              className="account-button"
-              aria-label="Account and demo role"
-              aria-expanded={profileOpen}
-              onClick={() => setProfileOpen(!profileOpen)}
-            >
-              <span className="monogram">
-                {role === "employee" ? "AC" : "NB"}
-              </span>
-              <ChevronDown size={15} />
-            </button>
-            {profileOpen && (
-              <div className="account-menu">
-                <strong>
-                  {role === "employee" ? "Akin Cole" : "Nadia Bello"}
-                </strong>
-                <span>
-                  {role === "employee"
-                    ? "Employee · organiser"
-                    : "Manager · approvals"}
+    <TeamContext.Provider
+      value={{
+        live,
+        viewerId,
+        viewerName,
+        managerName,
+        members: teamMembers,
+        teamName,
+      }}
+    >
+      <>
+        <a
+          className="skip-link"
+          href="#main"
+          onClick={(e) => {
+            e.preventDefault();
+            main.current?.focus();
+          }}
+        >
+          Skip to content
+        </a>
+        <header className="site-header">
+          <div className="header-inner">
+            <a href="#home" aria-label="Teamfare home" className="brand-link">
+              <Brand />
+            </a>
+            <nav className="main-nav" aria-label="Main navigation">
+              {navLinks}
+            </nav>
+            <div className="account" ref={profile}>
+              <span className="team-name">{teamName}</span>
+              <button
+                className="account-button"
+                aria-label={live ? "Account" : "Account and demo role"}
+                aria-expanded={profileOpen}
+                onClick={() => setProfileOpen(!profileOpen)}
+              >
+                <span className="monogram">
+                  {teamMembers.find((member) => member.id === viewerId)
+                    ?.initials ?? "TF"}
                 </span>
-                <hr />
-                {(["employee", "manager"] as const).map((item) => (
+                <ChevronDown size={15} />
+              </button>
+              {profileOpen && (
+                <div className="account-menu">
+                  <strong>{viewerName}</strong>
+                  <span>
+                    {role === "employee"
+                      ? "Employee · organiser"
+                      : "Manager · approvals"}
+                  </span>
+                  <hr />
+                  {!live &&
+                    (["employee", "manager"] as const).map((item) => (
+                      <button
+                        key={item}
+                        onClick={() => {
+                          setRole(item);
+                          setPlanFilter("auto");
+                          setProfileOpen(false);
+                        }}
+                        aria-pressed={role === item}
+                      >
+                        Try the {item} view
+                        <span>{role === item ? "✓" : "→"}</span>
+                      </button>
+                    ))}
                   <button
-                    key={item}
                     onClick={() => {
-                      setRole(item);
-                      setPlanFilter("auto");
+                      setDialog({ type: "people" });
                       setProfileOpen(false);
                     }}
-                    aria-pressed={role === item}
                   >
-                    Try the {item} view<span>{role === item ? "✓" : "→"}</span>
+                    Team preferences
+                    <Users size={15} />
                   </button>
-                ))}
-                <button
-                  onClick={() => {
-                    setDialog({ type: "people" });
-                    setProfileOpen(false);
-                  }}
-                >
-                  Team preferences
-                  <Users size={15} />
-                </button>
-                <p>Role switch for this local preview; not authentication.</p>
-              </div>
-            )}
+                  {live ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          void refresh().catch(() => setSyncError(true));
+                          setProfileOpen(false);
+                        }}
+                      >
+                        Refresh team data
+                      </button>
+                      {role === "manager" && (
+                        <button
+                          onClick={() => {
+                            setInvitation(null);
+                            setDialog({ type: "invite" });
+                            setProfileOpen(false);
+                          }}
+                        >
+                          Invite teammate
+                        </button>
+                      )}
+                      <button onClick={() => void signOut()}>Sign out</button>
+                      <p>{connection?.user.email}</p>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={onExit}>Sign in to Teamfare</button>
+                      <p>
+                        Role switch for this local preview; not authentication.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </header>
-      <nav className="bottom-nav" aria-label="Mobile navigation">
-        {navLinks}
-      </nav>
-      <main
-        id="main"
-        ref={main}
-        tabIndex={-1}
-        className={`page-width ${selectedPlan ? "sheet-page" : ""}`}
-      >
-        {storageError && (
-          <p className="storage-warning" role="alert">
-            Browser storage is unavailable. Changes will be lost when you close
-            this page.
-          </p>
-        )}
-        {view === "discover" && (
-          <Home
-            demo={demo}
-            role={role}
-            onStart={start}
-            onSaveIdea={(id) =>
-              setDemo((current) => ({
-                ...current,
-                saved: current.saved.includes(id)
-                  ? current.saved.filter((item) => item !== id)
-                  : [...current.saved, id],
-              }))
-            }
-            onExplore={(experience) =>
-              setDialog({ type: "experience", experience })
-            }
-          />
-        )}
-        {view === "plans" &&
-          (route.startsWith("plan/") ? (
-            selectedPlan ? (
-              <PlanSheet
-                key={`${selectedPlan.id}-${selectedPlan.status}-${role}`}
-                plan={selectedPlan}
-                expenses={demo.expenses.filter(
-                  (expense) => expense.planId === selectedPlan.id,
-                )}
-                role={role}
-                onSave={savePlan}
-                onRsvp={(going) => rsvp(selectedPlan, going)}
-                onExpense={() =>
-                  setDialog({ type: "expense", planId: selectedPlan.id })
-                }
-                onCancel={() =>
-                  setDialog({ type: "cancel", id: selectedPlan.id })
-                }
-                announce={setToast}
-              />
+        </header>
+        <nav className="bottom-nav" aria-label="Mobile navigation">
+          {navLinks}
+        </nav>
+        <main
+          id="main"
+          ref={main}
+          tabIndex={-1}
+          className={`page-width ${selectedPlan ? "sheet-page" : ""}`}
+          aria-busy={saving}
+        >
+          {saving && (
+            <p className="save-status" role="status">
+              Saving to your team…
+            </p>
+          )}
+          {syncError && (
+            <p className="storage-warning" role="alert">
+              Connection lost. Changes cannot be saved until the server
+              reconnects.
+            </p>
+          )}
+          {storageError && (
+            <p className="storage-warning" role="alert">
+              Browser storage is unavailable. Changes will be lost when you
+              close this page.
+            </p>
+          )}
+          {view === "discover" && (
+            <Home
+              demo={demo}
+              role={role}
+              onStart={start}
+              onSaveIdea={saveIdea}
+              onExplore={(experience) =>
+                setDialog({ type: "experience", experience })
+              }
+            />
+          )}
+          {view === "plans" &&
+            (route.startsWith("plan/") ? (
+              selectedPlan ? (
+                <PlanSheet
+                  key={`${selectedPlan.id}-${selectedPlan.status}-${role}-${live ? selectedPlan.revision : "local"}`}
+                  plan={selectedPlan}
+                  expenses={demo.expenses.filter(
+                    (expense) => expense.planId === selectedPlan.id,
+                  )}
+                  role={role}
+                  onSave={savePlan}
+                  onRsvp={(going) => rsvp(selectedPlan, going)}
+                  onExpense={() =>
+                    setDialog({ type: "expense", planId: selectedPlan.id })
+                  }
+                  onCancel={() =>
+                    setDialog({ type: "cancel", id: selectedPlan.id })
+                  }
+                  announce={setToast}
+                />
+              ) : (
+                <div className="empty-state">
+                  <h1>Plan not found</h1>
+                  <p>
+                    {live
+                      ? "This plan is not available in your team."
+                      : "This plan may have been removed when the preview was reset."}
+                  </p>
+                  <a href="#plans" className="button button-outline">
+                    Back to plans
+                  </a>
+                </div>
+              )
             ) : (
-              <div className="empty-state">
-                <h1>Plan not found</h1>
-                <p>
-                  This plan may have been removed when the preview was reset.
+              <section className="plans-page">
+                <header className="page-heading">
+                  <div>
+                    <span className="eyebrow">Good ideas, taking shape</span>
+                    <h1>Plans</h1>
+                    <p>From “we should” to “see you there”.</p>
+                  </div>
+                  <button
+                    className="button button-dark"
+                    onClick={() => start()}
+                  >
+                    Plan something
+                    <Plus size={18} />
+                  </button>
+                </header>
+                <div
+                  className="text-tabs"
+                  role="group"
+                  aria-label="Filter plans"
+                >
+                  {["Needs you", "Upcoming", "Past and cancelled", "All"].map(
+                    (filter) => (
+                      <button
+                        key={filter}
+                        aria-pressed={currentFilter === filter}
+                        className={currentFilter === filter ? "active" : ""}
+                        onClick={() => {
+                          setPlanFilter(filter);
+                          if (window.location.hash.includes("?"))
+                            navigate("plans");
+                        }}
+                      >
+                        {filter}
+                        {filter === "Needs you" && (
+                          <span className={pending ? "attention-count" : ""}>
+                            {pending}
+                          </span>
+                        )}
+                      </button>
+                    ),
+                  )}
+                </div>
+                <div className="plans-list">
+                  {filteredPlans.map((plan) => (
+                    <a
+                      href={`#plan/${plan.id}`}
+                      key={plan.id}
+                      className="plan-row"
+                      aria-label={`View ${plan.title}`}
+                    >
+                      <div className="plan-thumbnail">
+                        <ExperienceArt
+                          experience={experienceFor(plan.experienceId)}
+                        />
+                      </div>
+                      <div className="plan-row-main">
+                        <h2>{plan.title}</h2>
+                        <p>
+                          {dateLabel(plan.date)} · {placeFor(plan)} ·{" "}
+                          {plan.people} people
+                        </p>
+                        <RouteLine compact plan={plan} />
+                      </div>
+                      <div className="plan-row-cost">
+                        <strong>
+                          {money(totalFor(plan))}
+                          <small>Estimate · total</small>
+                        </strong>
+                        <span>{money(priceFor(plan))} per person</span>
+                        <span
+                          className={`row-action ${needsYou(plan, role, live ? viewerId : "akin") ? "needs-action" : ""}`}
+                        >
+                          {nextAction(plan, role, live ? viewerId : "akin")}
+                          <ArrowRight size={16} />
+                        </span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+                {!filteredPlans.length && (
+                  <div className="empty-state">
+                    <CalendarDays size={40} strokeWidth={1} />
+                    <h2>
+                      {currentFilter === "Needs you"
+                        ? "You’re all caught up."
+                        : currentFilter === "Upcoming"
+                          ? "Make room for a good plan."
+                          : "Nothing here yet."}
+                    </h2>
+                    <p>
+                      {currentFilter === "Needs you"
+                        ? "No plans are waiting on your next move."
+                        : "Your team’s outings will appear here."}
+                    </p>
+                    <button className="text-button" onClick={() => start()}>
+                      Start a plan
+                      <ArrowRight size={16} />
+                    </button>
+                  </div>
+                )}
+                {!demo.plans.length && (
+                  <div className="first-run">
+                    <h2>A good plan, in five steps.</h2>
+                    {[
+                      "Idea — shape the outing.",
+                      "Proposed — send it for review.",
+                      "Approved — let the team RSVP.",
+                      "Happening — enjoy the time together.",
+                      "Settled — finish the expense record.",
+                    ].map((text) => (
+                      <p key={text}>{text}</p>
+                    ))}
+                  </div>
+                )}
+                <p className="field-help page-footnote">
+                  {live
+                    ? "Plans and decisions are saved to your team. Bookings and invitations are not sent."
+                    : "Plans and decisions are saved in this browser. Bookings and invitations are not sent."}
                 </p>
-                <a href="#plans" className="button button-outline">
-                  Back to plans
-                </a>
-              </div>
-            )
-          ) : (
-            <section className="plans-page">
+              </section>
+            ))}
+          {view === "expenses" && (
+            <section className="expenses-page">
               <header className="page-heading">
                 <div>
-                  <span className="eyebrow">Good ideas, taking shape</span>
-                  <h1>Plans</h1>
-                  <p>From “we should” to “see you there”.</p>
+                  <span className="eyebrow">Every outing, accounted for</span>
+                  <h1>Expenses</h1>
+                  <p>A clear record. Fewer loose ends.</p>
                 </div>
-                <button className="button button-dark" onClick={() => start()}>
-                  Plan something
-                  <Plus size={18} />
-                </button>
-              </header>
-              <div className="text-tabs" role="group" aria-label="Filter plans">
-                {["Needs you", "Upcoming", "Past and cancelled", "All"].map(
-                  (filter) => (
-                    <button
-                      key={filter}
-                      aria-pressed={currentFilter === filter}
-                      className={currentFilter === filter ? "active" : ""}
-                      onClick={() => {
-                        setPlanFilter(filter);
-                        if (window.location.hash.includes("?"))
-                          navigate("plans");
-                      }}
-                    >
-                      {filter}
-                      {filter === "Needs you" && (
-                        <span className={pending ? "attention-count" : ""}>
-                          {pending}
-                        </span>
-                      )}
-                    </button>
-                  ),
-                )}
-              </div>
-              <div className="plans-list">
-                {filteredPlans.map((plan) => (
-                  <a
-                    href={`#plan/${plan.id}`}
-                    key={plan.id}
-                    className="plan-row"
-                    aria-label={`View ${plan.title}`}
+                <div className="page-heading-actions">
+                  <button
+                    className="button button-outline"
+                    onClick={exportExpenses}
                   >
-                    <div className="plan-thumbnail">
-                      <ExperienceArt
-                        experience={experienceFor(plan.experienceId)}
-                      />
-                    </div>
-                    <div className="plan-row-main">
-                      <h2>{plan.title}</h2>
-                      <p>
-                        {dateLabel(plan.date)} · {placeFor(plan)} ·{" "}
-                        {plan.people} people
-                      </p>
-                      <RouteLine compact plan={plan} />
-                    </div>
-                    <div className="plan-row-cost">
-                      <strong>
-                        {money(totalFor(plan))}
-                        <small>Estimate · total</small>
-                      </strong>
-                      <span>
-                        {money(experienceFor(plan.experienceId).price)} per
-                        person
-                      </span>
-                      <span
-                        className={`row-action ${needsYou(plan, role) ? "needs-action" : ""}`}
-                      >
-                        {nextAction(plan, role)}
-                        <ArrowRight size={16} />
-                      </span>
-                    </div>
-                  </a>
-                ))}
+                    <ArrowDownToLine size={17} />
+                    Export CSV
+                  </button>
+                  <button
+                    className="button button-dark"
+                    onClick={() => setDialog({ type: "expense" })}
+                  >
+                    Add expense
+                    <Plus size={18} />
+                  </button>
+                </div>
+              </header>
+              <div className="expense-summary">
+                <p>
+                  <strong>{money(spent)}</strong> recorded against{" "}
+                  {money(budget)} total budget.
+                </p>
+                <SpendBar spent={spent} budget={budget} />
+                <span>
+                  Across {activePlans.length} active{" "}
+                  {activePlans.length === 1 ? "outing" : "outings"}. Cancelled
+                  outings are excluded from this overview; their records remain
+                  below.
+                </span>
               </div>
-              {!filteredPlans.length && (
+              <div className="expense-tools">
+                <label className="field">
+                  Show expenses for
+                  <span className="select-control">
+                    <select
+                      aria-label="Filter expenses by outing"
+                      value={expenseFilter}
+                      onChange={(e) => setExpenseFilter(e.target.value)}
+                    >
+                      <option value="all">All outings</option>
+                      {demo.plans.map((plan) => (
+                        <option key={plan.id} value={plan.id}>
+                          {plan.title}
+                          {plan.status === "Cancelled" ? " (cancelled)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      className="select-chevron"
+                      size={12}
+                      aria-hidden="true"
+                    />
+                  </span>
+                </label>
+                <p className="field-help">
+                  Amounts in NGN · export follows your filter.
+                </p>
+              </div>
+              {demo.plans
+                .filter(
+                  (plan) =>
+                    (expenseFilter === "all" || plan.id === expenseFilter) &&
+                    demo.expenses.some((expense) => expense.planId === plan.id),
+                )
+                .map((plan) => {
+                  const records = visibleExpenses.filter(
+                      (expense) => expense.planId === plan.id,
+                    ),
+                    recorded = records.reduce(
+                      (sum, expense) => sum + expense.amount,
+                      0,
+                    );
+                  return (
+                    <section className="expense-group" key={plan.id}>
+                      <header>
+                        <div>
+                          <h2>
+                            <a href={`#plan/${plan.id}`}>
+                              {plan.title}
+                              <ArrowRight size={19} />
+                            </a>
+                          </h2>
+                          <p>
+                            {dateLabel(plan.date)} · {plan.people} people
+                            {plan.status === "Cancelled"
+                              ? " · Cancelled"
+                              : plan.settledAt
+                                ? " · Settled"
+                                : ""}
+                          </p>
+                          <p className="group-estimate">
+                            Estimate {money(totalFor(plan))} total ·{" "}
+                            {money(priceFor(plan))} per person × {plan.people}
+                          </p>
+                        </div>
+                        <div className="group-spend">
+                          <span>
+                            Recorded {money(recorded)} total / Budget{" "}
+                            {money(plan.budget)} total
+                          </span>
+                          <SpendBar spent={recorded} budget={plan.budget} />
+                        </div>
+                      </header>
+                      <ExpenseLedger expenses={records} />
+                    </section>
+                  );
+                })}
+              {!visibleExpenses.length && (
                 <div className="empty-state">
-                  <CalendarDays size={40} strokeWidth={1} />
-                  <h2>
-                    {currentFilter === "Needs you"
-                      ? "You’re all caught up."
-                      : currentFilter === "Upcoming"
-                        ? "Make room for a good plan."
-                        : "Nothing here yet."}
-                  </h2>
-                  <p>
-                    {currentFilter === "Needs you"
-                      ? "No plans are waiting on your next move."
-                      : "Your team’s outings will appear here."}
-                  </p>
-                  <button className="text-button" onClick={() => start()}>
-                    Start a plan
+                  <ReceiptText size={40} strokeWidth={1} />
+                  <h2>Start a clear record.</h2>
+                  <p>Record an expense against an approved outing.</p>
+                  <button
+                    className="text-button"
+                    onClick={() => setDialog({ type: "expense" })}
+                  >
+                    Add expense
                     <ArrowRight size={16} />
                   </button>
                 </div>
               )}
-              {!demo.plans.length && (
-                <div className="first-run">
-                  <h2>A good plan, in five steps.</h2>
-                  {[
-                    "Idea — shape the outing.",
-                    "Proposed — send it for review.",
-                    "Approved — let the team RSVP.",
-                    "Happening — enjoy the time together.",
-                    "Settled — finish the expense record.",
-                  ].map((text) => (
-                    <p key={text}>{text}</p>
-                  ))}
-                </div>
-              )}
               <p className="field-help page-footnote">
-                Plans and decisions are saved in this browser. Bookings and
-                invitations are not sent.
+                Expense records only. No card is charged and no reimbursement is
+                initiated.
               </p>
             </section>
-          ))}
-        {view === "expenses" && (
-          <section className="expenses-page">
-            <header className="page-heading">
-              <div>
-                <span className="eyebrow">Every outing, accounted for</span>
-                <h1>Expenses</h1>
-                <p>A clear record. Fewer loose ends.</p>
-              </div>
-              <div className="page-heading-actions">
-                <button
-                  className="button button-outline"
-                  onClick={exportExpenses}
-                >
-                  <ArrowDownToLine size={17} />
-                  Export CSV
-                </button>
-                <button
-                  className="button button-dark"
-                  onClick={() => setDialog({ type: "expense" })}
-                >
-                  Add expense
-                  <Plus size={18} />
-                </button>
-              </div>
-            </header>
-            <div className="expense-summary">
-              <p>
-                <strong>{money(spent)}</strong> recorded against {money(budget)}{" "}
-                total budget.
-              </p>
-              <SpendBar spent={spent} budget={budget} />
-              <span>
-                Across {activePlans.length} active{" "}
-                {activePlans.length === 1 ? "outing" : "outings"}. Cancelled
-                outings are excluded from this overview; their records remain
-                below.
-              </span>
-            </div>
-            <div className="expense-tools">
-              <label className="field">
-                Show expenses for
-                <span className="select-control">
-                  <select
-                    aria-label="Filter expenses by outing"
-                    value={expenseFilter}
-                    onChange={(e) => setExpenseFilter(e.target.value)}
-                  >
-                    <option value="all">All outings</option>
-                    {demo.plans.map((plan) => (
-                      <option key={plan.id} value={plan.id}>
-                        {plan.title}
-                        {plan.status === "Cancelled" ? " (cancelled)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    className="select-chevron"
-                    size={12}
-                    aria-hidden="true"
-                  />
-                </span>
-              </label>
-              <p className="field-help">
-                Amounts in NGN · export follows your filter.
-              </p>
-            </div>
-            {demo.plans
-              .filter(
-                (plan) =>
-                  (expenseFilter === "all" || plan.id === expenseFilter) &&
-                  demo.expenses.some((expense) => expense.planId === plan.id),
-              )
-              .map((plan) => {
-                const records = visibleExpenses.filter(
-                    (expense) => expense.planId === plan.id,
-                  ),
-                  recorded = records.reduce(
-                    (sum, expense) => sum + expense.amount,
-                    0,
-                  );
-                return (
-                  <section className="expense-group" key={plan.id}>
-                    <header>
-                      <div>
-                        <h2>
-                          <a href={`#plan/${plan.id}`}>
-                            {plan.title}
-                            <ArrowRight size={19} />
-                          </a>
-                        </h2>
-                        <p>
-                          {dateLabel(plan.date)} · {plan.people} people
-                          {plan.status === "Cancelled"
-                            ? " · Cancelled"
-                            : plan.settledAt
-                              ? " · Settled"
-                              : ""}
-                        </p>
-                        <p className="group-estimate">
-                          Estimate {money(totalFor(plan))} total ·{" "}
-                          {money(experienceFor(plan.experienceId).price)} per
-                          person × {plan.people}
-                        </p>
-                      </div>
-                      <div className="group-spend">
-                        <span>
-                          Recorded {money(recorded)} total / Budget{" "}
-                          {money(plan.budget)} total
-                        </span>
-                        <SpendBar spent={recorded} budget={plan.budget} />
-                      </div>
-                    </header>
-                    <ExpenseLedger expenses={records} />
-                  </section>
-                );
-              })}
-            {!visibleExpenses.length && (
-              <div className="empty-state">
-                <ReceiptText size={40} strokeWidth={1} />
-                <h2>Start a clear record.</h2>
-                <p>Record an expense against an approved outing.</p>
-                <button
-                  className="text-button"
-                  onClick={() => setDialog({ type: "expense" })}
-                >
-                  Add expense
-                  <ArrowRight size={16} />
-                </button>
-              </div>
+          )}
+        </main>
+        <footer className="site-footer page-width">
+          <span>Time together. Well spent.</span>
+          <div>
+            <button onClick={() => setDialog({ type: "about" })}>
+              {live ? "About Teamfare" : "About this preview"}
+            </button>
+            {!live && (
+              <button onClick={() => setDialog({ type: "reset" })}>
+                Reset preview
+              </button>
             )}
-            <p className="field-help page-footnote">
-              Expense records only. No card is charged and no reimbursement is
-              initiated.
-            </p>
-          </section>
-        )}
-      </main>
-      <footer className="site-footer page-width">
-        <span>Time together. Well spent.</span>
-        <div>
-          <button onClick={() => setDialog({ type: "about" })}>
-            About this preview
-          </button>
-          <button onClick={() => setDialog({ type: "reset" })}>
-            Reset preview
+          </div>
+          <span>Teamfare © {year}</span>
+        </footer>
+        <div
+          className={`toast ${toast ? "toast-visible" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {toast}
+          <button
+            onClick={() => {
+              setToast("");
+              main.current?.focus({ preventScroll: true });
+            }}
+            aria-label="Dismiss notification"
+          >
+            <X size={16} />
           </button>
         </div>
-        <span>Teamfare © {year}</span>
-      </footer>
-      <div
-        className={`toast ${toast ? "toast-visible" : ""}`}
-        role="status"
-        aria-live="polite"
-      >
-        {toast}
-        <button
-          onClick={() => {
-            setToast("");
-            main.current?.focus({ preventScroll: true });
-          }}
-          aria-label="Dismiss notification"
-        >
-          <X size={16} />
-        </button>
-      </div>
-      {dialog?.type === "expense" && (
-        <ExpenseForm
-          plans={demo.plans}
-          defaultPlanId={dialog.planId}
-          onClose={() => setDialog(null)}
-          onSubmit={addExpense}
-        />
-      )}
-      {dialog?.type === "experience" && (
-        <Modal title="Experience details" wide onClose={() => setDialog(null)}>
-          <div className="experience-detail">
-            <ExperienceArt experience={dialog.experience} />
-            <div>
-              <span className="eyebrow">{dialog.experience.category}</span>
-              <h2>{dialog.experience.name}</h2>
-              <p>{dialog.experience.description}</p>
-              <p>
-                {dialog.experience.area} · {dialog.experience.duration}
-              </p>
-              <ul>
-                {dialog.experience.includes.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-              <strong className="detail-price">
-                {money(dialog.experience.price)} per person
-              </strong>
-              <p className="field-help">
-                Sample experience, estimated price. No live availability or
-                booking.
-              </p>
+        {dialog?.type === "invite" && live && role === "manager" && (
+          <Modal title="Invite teammate" onClose={() => setDialog(null)}>
+            <h2>A place at the table.</h2>
+            <p className="modal-description">
+              Create a one-use code and share it with your teammate. It expires
+              in three days. No email is sent automatically.
+            </p>
+            {!invitation ? (
+              <>
+                <label className="field">
+                  Team role
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value as Role)}
+                  >
+                    <option value="employee">Employee</option>
+                    <option value="manager">
+                      Manager (can approve plans and invite people)
+                    </option>
+                  </select>
+                </label>
+                <button
+                  className="button button-dark modal-done"
+                  disabled={saving}
+                  onClick={async () => {
+                    const result = await mutate<{
+                      code: string;
+                      expiresAt: string;
+                    }>("/invites", { role: inviteRole });
+                    if (result) setInvitation(result);
+                  }}
+                >
+                  Create invitation code
+                </button>
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  Invitation code
+                  <input
+                    readOnly
+                    value={invitation.code}
+                    onFocus={(e) => e.target.select()}
+                  />
+                </label>
+                <p className="field-help">
+                  Ask them to open Teamfare, choose Join a team, and enter this
+                  code. Share it only with the intended teammate.
+                </p>
+                <button
+                  className="button button-dark modal-done"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(invitation.code);
+                      setToast("Invitation code copied.");
+                    } catch {
+                      setToast(
+                        "Select the invitation code and copy it manually.",
+                      );
+                    }
+                  }}
+                >
+                  Copy code
+                </button>
+              </>
+            )}
+          </Modal>
+        )}
+        {dialog?.type === "expense" && (
+          <ExpenseForm
+            plans={demo.plans}
+            defaultPlanId={dialog.planId}
+            onClose={() => setDialog(null)}
+            onSubmit={addExpense}
+          />
+        )}
+        {dialog?.type === "experience" && (
+          <Modal
+            title="Experience details"
+            wide
+            onClose={() => setDialog(null)}
+          >
+            <div className="experience-detail">
+              <ExperienceArt experience={dialog.experience} />
+              <div>
+                <span className="eyebrow">{dialog.experience.category}</span>
+                <h2>{dialog.experience.name}</h2>
+                <p>{dialog.experience.description}</p>
+                <p>
+                  {dialog.experience.area} · {dialog.experience.duration}
+                </p>
+                <ul>
+                  {dialog.experience.includes.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+                <strong className="detail-price">
+                  {money(dialog.experience.price)} per person
+                </strong>
+                <p className="field-help">
+                  Sample experience, estimated price. No live availability or
+                  booking.
+                </p>
+                <button
+                  className="button button-dark"
+                  onClick={() =>
+                    start(
+                      {
+                        brief: "",
+                        people: 8,
+                        date: localDate(8),
+                        location: dialog.experience.area,
+                        perPerson: dialog.experience.price + 2500,
+                      },
+                      dialog.experience.id,
+                    )
+                  }
+                >
+                  Start a plan
+                  <ArrowRight size={18} />
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {dialog?.type === "cancel" && (
+          <Modal title="Cancel outing" onClose={() => setDialog(null)}>
+            <h2>Cancel this outing?</h2>
+            <p className="modal-description">
+              It will leave Upcoming. Recorded expenses and activity will
+              remain. No external venue booking is affected.
+            </p>
+            <div className="form-actions">
+              <button
+                className="button button-outline"
+                onClick={() => setDialog(null)}
+              >
+                Keep outing
+              </button>
               <button
                 className="button button-dark"
-                onClick={() =>
-                  start(
-                    {
-                      brief: "",
-                      people: 8,
-                      date: localDate(8),
-                      location: dialog.experience.area,
-                      perPerson: dialog.experience.price + 2500,
-                    },
-                    dialog.experience.id,
-                  )
-                }
+                onClick={async () => {
+                  const plan = demo.plans.find(
+                    (item) => item.id === dialog.id,
+                  )!;
+                  const saved = await savePlan({
+                    ...plan,
+                    status: "Cancelled",
+                    events: [
+                      ...(plan.events ?? []),
+                      event(
+                        `${role === "manager" ? "Nadia" : "Akin"} cancelled the outing.`,
+                      ),
+                    ],
+                  });
+                  if (!saved) return;
+                  setDialog(null);
+                  navigate("plans");
+                  setPlanFilter("Upcoming");
+                  setToast("Outing cancelled. Expense records are kept.");
+                }}
               >
-                Start a plan
-                <ArrowRight size={18} />
+                Cancel outing
               </button>
             </div>
-          </div>
-        </Modal>
-      )}
-      {dialog?.type === "cancel" && (
-        <Modal title="Cancel outing" onClose={() => setDialog(null)}>
-          <h2>Cancel this outing?</h2>
-          <p className="modal-description">
-            It will leave Upcoming. Recorded expenses and activity will remain.
-            No external venue booking is affected.
-          </p>
-          <div className="form-actions">
+          </Modal>
+        )}
+        {dialog?.type === "about" && (
+          <Modal
+            title={live ? "About Teamfare" : "About this preview"}
+            onClose={() => setDialog(null)}
+          >
+            <h2>
+              Good company.
+              <br />
+              Less coordination.
+            </h2>
+            <p className="modal-description">
+              {live
+                ? "Your team shares plans, approvals, RSVPs and expenses through the Teamfare server. Experiences and prices are still samples."
+                : "Teamfare brings outing plans, approvals, RSVPs and expenses into one place. This preview uses sample experiences and fictional teammates, with changes saved in your browser."}
+            </p>
+            <p>
+              {live
+                ? "AI research, verified venue availability, booking, email invitations and payments are not connected yet."
+                : "AI research, authentication, venue bookings, invitations, payments and cloud services are not connected. The manager switch is for exploring the local workflow."}
+            </p>
             <button
-              className="button button-outline"
+              className="button button-dark modal-done"
               onClick={() => setDialog(null)}
             >
-              Keep outing
+              Back to Teamfare
             </button>
+          </Modal>
+        )}
+        {dialog?.type === "reset" && (
+          <Modal title="Reset preview" onClose={() => setDialog(null)}>
+            <h2>A fresh start?</h2>
+            <p className="modal-description">
+              This removes your local plans, saved ideas, preferences and
+              expenses, then restores the sample outings.
+            </p>
+            <div className="form-actions">
+              <button
+                className="button button-outline"
+                onClick={() => setDialog(null)}
+              >
+                Keep my changes
+              </button>
+              <button
+                className="button button-dark"
+                onClick={() => {
+                  setDemo(structuredClone(initialDemo));
+                  setRole("employee");
+                  setPlanFilter("auto");
+                  setExpenseFilter("all");
+                  setDialog(null);
+                  navigate("home");
+                  setToast("Preview reset.");
+                }}
+              >
+                Reset preview
+              </button>
+            </div>
+          </Modal>
+        )}
+        {dialog?.type === "people" && (
+          <Modal title="Team preferences" onClose={() => setDialog(null)}>
+            <h2>Your team, considered.</h2>
+            <p className="modal-description">
+              {live
+                ? `${teamMembers.length} teammates. Your dietary preference is saved to your account.`
+                : "Eight sample teammates. Preferences are saved here for planning; they are not sent to a venue."}
+            </p>
+            <label className="field">
+              Dietary preference
+              <select
+                value={demo.preference}
+                onChange={(e) => void preference(e.target.value)}
+              >
+                <option>No preference</option>
+                <option>Vegetarian options</option>
+                <option>Vegan options</option>
+                <option>Halal options</option>
+              </select>
+            </label>
+            <div className="preference-people">
+              {teamMembers.map((member) => (
+                <span key={member.id}>
+                  <span className="monogram">{member.initials}</span>
+                  {member.name}
+                </span>
+              ))}
+            </div>
             <button
               className="button button-dark"
-              onClick={() => {
-                const plan = demo.plans.find((item) => item.id === dialog.id)!;
-                savePlan({
-                  ...plan,
-                  status: "Cancelled",
-                  events: [
-                    ...(plan.events ?? []),
-                    event(
-                      `${role === "manager" ? "Nadia" : "Akin"} cancelled the outing.`,
-                    ),
-                  ],
-                });
-                setDialog(null);
-                navigate("plans");
-                setPlanFilter("Upcoming");
-                setToast("Outing cancelled. Expense records are kept.");
-              }}
-            >
-              Cancel outing
-            </button>
-          </div>
-        </Modal>
-      )}
-      {dialog?.type === "about" && (
-        <Modal title="About this preview" onClose={() => setDialog(null)}>
-          <h2>
-            Good company.
-            <br />
-            Less coordination.
-          </h2>
-          <p className="modal-description">
-            Teamfare brings outing plans, approvals, RSVPs and expenses into one
-            place. This preview uses sample experiences and fictional teammates,
-            with changes saved in your browser.
-          </p>
-          <p>
-            AI research, authentication, venue bookings, invitations, payments
-            and cloud services are not connected. The manager switch is for
-            exploring the local workflow.
-          </p>
-          <button
-            className="button button-dark modal-done"
-            onClick={() => setDialog(null)}
-          >
-            Back to Teamfare
-          </button>
-        </Modal>
-      )}
-      {dialog?.type === "reset" && (
-        <Modal title="Reset preview" onClose={() => setDialog(null)}>
-          <h2>A fresh start?</h2>
-          <p className="modal-description">
-            This removes your local plans, saved ideas, preferences and
-            expenses, then restores the sample outings.
-          </p>
-          <div className="form-actions">
-            <button
-              className="button button-outline"
               onClick={() => setDialog(null)}
             >
-              Keep my changes
+              Done
             </button>
-            <button
-              className="button button-dark"
-              onClick={() => {
-                setDemo(structuredClone(initialDemo));
-                setRole("employee");
-                setPlanFilter("auto");
-                setExpenseFilter("all");
-                setDialog(null);
-                navigate("home");
-                setToast("Preview reset.");
-              }}
-            >
-              Reset preview
-            </button>
-          </div>
-        </Modal>
-      )}
-      {dialog?.type === "people" && (
-        <Modal title="Team preferences" onClose={() => setDialog(null)}>
-          <h2>Your team, considered.</h2>
-          <p className="modal-description">
-            Eight sample teammates. Preferences are saved here for planning;
-            they are not sent to a venue.
-          </p>
-          <label className="field">
-            Dietary preference
-            <select
-              value={demo.preference}
-              onChange={(e) =>
-                setDemo((current) => ({
-                  ...current,
-                  preference: e.target.value,
-                }))
-              }
-            >
-              <option>No preference</option>
-              <option>Vegetarian options</option>
-              <option>Vegan options</option>
-              <option>Halal options</option>
-            </select>
-          </label>
-          <div className="preference-people">
-            {members.map((member) => (
-              <span key={member.id}>
-                <span className="monogram">{member.initials}</span>
-                {member.name}
-              </span>
-            ))}
-          </div>
-          <button
-            className="button button-dark"
-            onClick={() => setDialog(null)}
-          >
-            Done
-          </button>
-        </Modal>
-      )}
-    </>
+          </Modal>
+        )}
+      </>
+    </TeamContext.Provider>
   );
 }

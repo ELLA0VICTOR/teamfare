@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() =>
+    sessionStorage.setItem("teamfare-mode", "preview"),
+  );
+});
 
 async function switchRole(page: Page, role: "manager" | "employee") {
   await page.getByRole("button", { name: "Account and demo role" }).click();

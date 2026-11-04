@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowRight } from "lucide-react";
+import { useTeam } from "../team-context";
 import { Modal } from "./Modal";
-import { localDate, members } from "../data";
+import { localDate } from "../data";
 import type { Expense, Plan } from "../data";
 
 export function ExpenseForm({
@@ -16,8 +17,16 @@ export function ExpenseForm({
   onClose: () => void;
   onSubmit: (expense: Expense) => void;
 }) {
+  const { live, viewerId, members } = useTeam();
+  const viewer = members.find((member) => member.id === viewerId);
   const eligible = plans.filter(
-    (plan) => plan.status === "Approved" && !plan.settledAt,
+    (plan) =>
+      plan.status === "Approved" &&
+      !plan.settledAt &&
+      (!live ||
+        viewer?.role === "manager" ||
+        plan.createdBy === viewerId ||
+        plan.attendees.includes(viewerId)),
   );
   const [error, setError] = useState("");
   function submit(e: FormEvent<HTMLFormElement>) {
@@ -122,9 +131,21 @@ export function ExpenseForm({
           <label className="field">
             Paid by
             <select name="payer">
-              {members.map((member) => (
-                <option key={member.id}>{member.name}</option>
-              ))}
+              {members
+                .filter(
+                  (member) =>
+                    !live ||
+                    viewer?.role === "manager" ||
+                    member.id === viewerId,
+                )
+                .map((member) => (
+                  <option
+                    key={member.id}
+                    value={live ? member.id : member.name}
+                  >
+                    {member.name}
+                  </option>
+                ))}
             </select>
           </label>
           {error && (
@@ -133,7 +154,9 @@ export function ExpenseForm({
             </p>
           )}
           <p className="field-help">
-            Saved in this browser. No payment or reimbursement is made.
+            {live
+              ? "Saved to your team. No payment or reimbursement is made."
+              : "Saved in this browser. No payment or reimbursement is made."}
           </p>
           <button className="button button-dark full-width" type="submit">
             Record expense

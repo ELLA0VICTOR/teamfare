@@ -10,30 +10,38 @@ export function stageOf(plan: Plan) {
   if (plan.settledAt) return 4;
   return plan.date <= localDate() ? 3 : 2;
 }
-export function needsYou(plan: Plan, role: Role) {
-  return role === "manager"
-    ? plan.status === "Awaiting approval"
-    : plan.status === "Draft" ||
-        plan.status === "Changes requested" ||
-        (plan.status === "Approved" &&
-          !plan.settledAt &&
-          plan.date >= localDate() &&
-          plan.attendees.includes("akin") &&
-          !plan.going.includes("akin") &&
-          !plan.declined?.includes("akin"));
+export function needsYou(plan: Plan, role: Role, viewerId = "akin") {
+  const owns = plan.createdBy
+    ? plan.createdBy === viewerId
+    : role === "employee";
+  return (
+    (role === "manager" &&
+      plan.status === "Awaiting approval" &&
+      plan.createdBy !== viewerId) ||
+    (owns &&
+      (plan.status === "Draft" || plan.status === "Changes requested")) ||
+    (plan.status === "Approved" &&
+      (role === "employee" || !!plan.createdBy) &&
+      !plan.settledAt &&
+      plan.date >= localDate() &&
+      plan.attendees.includes(viewerId) &&
+      !plan.going.includes(viewerId) &&
+      !plan.declined?.includes(viewerId))
+  );
 }
-export const totalFor = (plan: Plan) =>
-  experienceFor(plan.experienceId).price * plan.people;
+export const totalFor = (plan: Plan) => priceFor(plan) * plan.people;
+export const priceFor = (plan: Plan) =>
+  plan.unitPrice ?? experienceFor(plan.experienceId).price;
 export const placeFor = (plan: Plan) =>
   plan.location || experienceFor(plan.experienceId).area;
-export const nextAction = (plan: Plan, role: Role) =>
+export const nextAction = (plan: Plan, role: Role, viewerId = "akin") =>
   plan.status === "Awaiting approval"
-    ? role === "manager"
+    ? role === "manager" && plan.createdBy !== viewerId
       ? "Review proposal"
       : "View proposal"
     : ["Draft", "Changes requested"].includes(plan.status)
       ? "Continue planning"
-      : needsYou(plan, role)
+      : needsYou(plan, role, viewerId)
         ? "RSVP"
         : plan.status === "Cancelled"
           ? "View record"

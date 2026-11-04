@@ -38,6 +38,9 @@ export type Plan = {
   declined?: string[];
   events?: PlanEvent[];
   settledAt?: string;
+  createdBy?: string;
+  revision?: number;
+  unitPrice?: number;
 };
 export type PlanEvent = {
   id: string;

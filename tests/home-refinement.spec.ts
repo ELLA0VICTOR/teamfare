@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() =>
+    sessionStorage.setItem("teamfare-mode", "preview"),
+  );
+});
 
 test("Next up prioritises action, links to Needs you, and falls back without an empty state", async ({
   page,

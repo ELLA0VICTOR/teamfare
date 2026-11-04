@@ -1,0 +1,13 @@
+services:
+  teamfare:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the public HTTPS URL}
+      TRUST_PROXY: "1"
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - teamfare-data:/var/lib/teamfare
+volumes:
+  teamfare-data:
