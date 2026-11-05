@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() =>
-    sessionStorage.setItem("teamfare-mode", "preview"),
-  );
+  // Preserve the existing NGN-specific journey; USD has separate coverage.
+  await page.addInitScript(() => {
+    sessionStorage.setItem("teamfare-mode", "preview");
+    localStorage.setItem("teamfare-display-currency-v1", "NGN");
+  });
 });
 
 test("Next up prioritises action, links to Needs you, and falls back without an empty state", async ({

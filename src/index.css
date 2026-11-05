@@ -339,3 +339,34 @@ textarea::placeholder {
     scroll-behavior: auto !important;
   }
 }
+/* Currency is a display preference; local source amounts remain intact. */
+.currency-switch select {
+  min-height: 44px;
+  width: 78px;
+  padding: 8px 20px 8px 8px;
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background-color: var(--paper);
+  color: var(--ink);
+}
+.currency-notice {
+  flex-basis: 100%;
+  order: 4;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.currency-notice a {
+  text-decoration: underline;
+}
+.site-footer {
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .currency-switch select {
+    width: 70px;
+  }
+}

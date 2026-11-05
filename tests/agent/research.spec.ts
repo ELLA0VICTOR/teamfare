@@ -8,6 +8,14 @@ test("sourced research becomes an editable plan and survives manager review and 
 }) => {
   const managerContext = await browser.newContext({ baseURL: origin }),
     employeeContext = await browser.newContext({ baseURL: origin });
+  // These existing assertions exercise the retained NGN entry mode.
+  await Promise.all(
+    [managerContext, employeeContext].map((context) =>
+      context.addInitScript(() =>
+        localStorage.setItem("teamfare-display-currency-v1", "NGN"),
+      ),
+    ),
+  );
   const suffix = crypto.randomUUID().slice(0, 8),
     password = "Agent-fixture-password!";
   const registered = await verifiedAccount(

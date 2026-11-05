@@ -1,4 +1,6 @@
 import type { Expense, Plan } from "./data.ts";
+import { displayAmount } from "./currency.ts";
+import type { CurrencyQuote, DisplayCurrency } from "./currency.ts";
 
 export type Receipt = {
   id: string;
@@ -16,7 +18,12 @@ export function filteredExpenses(expenses: Expense[], filter: ReportFilter) {
       (!filter.to || e.date <= filter.to),
   );
 }
-export function expenseCsv(expenses: Expense[], plans: Plan[]) {
+export function expenseCsv(
+  expenses: Expense[],
+  plans: Plan[],
+  conversion?: { currency: DisplayCurrency; quote: CurrencyQuote },
+) {
+  const usd = conversion?.currency === "USD";
   const cell = (value: string | number) => {
     const raw = String(value),
       safe = /^(?:\s*[=+@-]|[\t\r\n])/.test(raw) ? "'" + raw : raw;
@@ -25,14 +32,37 @@ export function expenseCsv(expenses: Expense[], plans: Plan[]) {
   return (
     "\uFEFF" +
     [
-      ["Date", "Outing", "Description", "Category", "Paid by", "Amount (NGN)"],
+      [
+        "Date",
+        "Outing",
+        "Description",
+        "Category",
+        "Paid by",
+        usd ? "Amount (USD)" : "Amount (NGN)",
+        ...(usd
+          ? [
+              "Original amount (NGN)",
+              "NGN per USD",
+              "Rate updated (UTC)",
+              "Rate source",
+            ]
+          : []),
+      ],
       ...expenses.map((e) => [
         e.date,
         plans.find((p) => p.id === e.planId)?.title ?? "",
         e.description,
         e.category,
         e.payer,
-        e.amount,
+        ...(usd
+          ? [
+              displayAmount(e.amount, "USD", conversion!.quote).toFixed(2),
+              e.amount,
+              conversion!.quote.ngnPerUsd,
+              conversion!.quote.updatedAt,
+              conversion!.quote.source,
+            ]
+          : [e.amount]),
       ]),
     ]
       .map((row) => row.map(cell).join(","))

@@ -1,0 +1,29 @@
+Why does planning one team lunch take so many messages?
+
+Introducing Teamfare. It helps teams plan an outing, get approval, and keep track of spending, all in one place.
+
+Let me show you how it works.
+
+We're planning lunch for four people in Victoria Island, Lagos. We have twenty-two dollars and twenty-eight cents per person to spend.
+
+I start with a short description of what we want. Then I enter the number of people, the location, a date, and our budget. When I'm ready, I click Research options.
+
+Teamfare's AI searches the web for places that could work. It brings back a few choices, with links to the information it found. I can see the expected cost and what each option includes. Any price that still needs checking is clearly marked as an estimate.
+
+I choose a place, and Teamfare turns it into a plan. The activities, guests, and costs are together on one page. I can change the details before sending it to anyone.
+
+Next, let's find a time. I suggest two options. Each invited teammate can tick the times that work for them. Teamfare shows the replies, so I can choose a time based on what people have actually said.
+
+Now I send the plan to our manager. In their own account, they can see the total cost, the cost for each person, and how much of the budget is left. They can ask for changes with a note, or approve the plan.
+
+After approval, teammates can say they're coming and download an event for their calendar. Private teams can also turn on email invitations and reminders. These shared judge accounts have outgoing emails switched off.
+
+Now let's record an expense. I enter a sample lunch cost of eight dollars and ninety-one cents and attach a sample receipt. The expense stays linked to this outing, so the manager can find it later.
+
+On the Expenses page, the manager can choose an outing and a date range, then download the matching records as a spreadsheet. That makes it easier to see what was spent and share a report.
+
+Teamfare runs on Vultr. Vultr Cloud Compute hosts the app. Qwen is the AI model, and we use it through Vultr Serverless Inference. Tavily handles web search. Vultr Object Storage keeps encrypted backups to help us recover our data.
+
+Bookings and payments still happen outside Teamfare. Teamfare brings the planning, team replies, approval, and spending records together.
+
+Bring your team together. Leave the admin to us.

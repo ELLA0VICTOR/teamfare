@@ -1,4 +1,5 @@
-import { dateLabel, money } from "../data";
+import { dateLabel } from "../data";
+import { useCurrency } from "../currency-context";
 import type { Expense } from "../data";
 import { ReceiptControl } from "./ReceiptControl";
 
@@ -13,6 +14,7 @@ export function ExpenseLedger({
   onChanged?: () => Promise<void>;
   locked?: boolean;
 }) {
+  const { money, currency } = useCurrency();
   return expenses.length ? (
     <table className="expense-table">
       <caption className="sr-only">Recorded expenses</caption>
@@ -22,7 +24,7 @@ export function ExpenseLedger({
           <th>Description</th>
           <th>Category</th>
           <th>Paid by</th>
-          <th className="amount">Amount (NGN)</th>
+          <th className="amount">Amount ({currency})</th>
         </tr>
       </thead>
       <tbody>
@@ -56,6 +58,7 @@ export function ExpenseLedger({
 }
 
 export function SpendBar({ spent, budget }: { spent: number; budget: number }) {
+  const { money } = useCurrency();
   return (
     <div
       className={`spend-bar ${spent > budget ? "spend-over" : ""}`}

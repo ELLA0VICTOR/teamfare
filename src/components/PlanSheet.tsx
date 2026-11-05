@@ -8,14 +8,9 @@ import {
   MapPin,
   Users,
 } from "lucide-react";
-import {
-  dateLabel,
-  experienceFor,
-  experiences,
-  localDate,
-  money,
-} from "../data";
+import { dateLabel, experienceFor, experiences, localDate } from "../data";
 import type { Expense, Plan } from "../data";
+import { MoneyInput, useCurrency } from "../currency-context";
 import {
   event,
   needsYou,
@@ -58,6 +53,15 @@ export function PlanSheet({
   onChanged?: () => Promise<void>;
 }) {
   const { live, viewerId, viewerName, managerName, members } = useTeam();
+  const {
+    money,
+    currency,
+    text,
+    difference: moneyDifference,
+    display,
+    format,
+    moneySum,
+  } = useCurrency();
   const actor = live ? viewerName : role === "manager" ? "Nadia" : "Akin";
   const managerLabel = live ? managerName : "Nadia";
   const creatorName =
@@ -83,6 +87,21 @@ export function PlanSheet({
   const unitPrice = priceFor(shown);
   const total = totalFor(shown);
   const difference = shown.budget - total;
+  const conversionRounding =
+    currency === "USD" && shown.proposal
+      ? (Math.round(display(total) * 100) -
+          shown.proposal.costs.reduce(
+            (sum, line) =>
+              sum +
+              Math.round(
+                display(
+                  line.amount * (line.unit === "per_person" ? shown.people : 1),
+                ) * 100,
+              ),
+            0,
+          )) /
+        100
+      : 0;
   const spent = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const isGoing = plan.going.includes(live ? viewerId : "akin"),
     declined = plan.declined?.includes(live ? viewerId : "akin");
@@ -273,7 +292,7 @@ export function PlanSheet({
             <div>
               <dt>Against budget</dt>
               <dd className={difference < 0 ? "error-text" : ""}>
-                {money(Math.abs(difference))}{" "}
+                {moneyDifference(shown.budget, total)}{" "}
                 {difference >= 0 ? "under" : "over"}
                 <small>{money(plan.budget)} total budget</small>
               </dd>
@@ -397,7 +416,12 @@ export function PlanSheet({
       <div className="sheet-layout">
         <div className="sheet-main">
           {live && csrf && onChanged && (
-            <AvailabilityPanel plan={plan} csrf={csrf} onChanged={onChanged} />
+            <AvailabilityPanel
+              key={`${plan.id}:${viewerId}`}
+              plan={plan}
+              csrf={csrf}
+              onChanged={onChanged}
+            />
           )}
           {plan.reviewNote && (
             <aside
@@ -518,15 +542,10 @@ export function PlanSheet({
                     />
                   </label>
                   <label className="field">
-                    Total budget (NGN)
-                    <input
-                      required
-                      type="number"
-                      min={0}
-                      max={100000000}
-                      step={1}
+                    Total budget ({currency})
+                    <MoneyInput
                       value={values.budget}
-                      onChange={(e) => change("budget", Number(e.target.value))}
+                      onValueChange={(value) => change("budget", value)}
                     />
                   </label>
                   <label className="field field-full">
@@ -543,7 +562,7 @@ export function PlanSheet({
                   <div className="proposal-editor">
                     <h3>Cost assumptions</h3>
                     <p className="field-help">
-                      Edit amounts in whole NGN. Changes become organiser
+                      Edit amounts in {currency}. Changes become organiser
                       estimates; source evidence stays attached.
                     </p>
                     {values.proposal.costs.map((line, index) => (
@@ -560,19 +579,13 @@ export function PlanSheet({
                           />
                         </label>
                         <label className="field">
-                          Amount (NGN)
-                          <input
-                            required
-                            type="number"
-                            min={0}
-                            max={10000000}
-                            step={1}
+                          Amount ({currency})
+                          <MoneyInput
                             value={line.amount}
-                            onChange={(event) =>
-                              editCost(index, {
-                                amount: Number(event.target.value),
-                              })
+                            onValueChange={(amount) =>
+                              editCost(index, { amount })
                             }
+                            max={10000000}
                           />
                         </label>
                         <label className="field">
@@ -786,7 +799,7 @@ export function PlanSheet({
                     </time>
                     <div>
                       <h3>{item.title}</h3>
-                      <p>{item.details}</p>
+                      <p>{text(item.details)}</p>
                     </div>
                   </div>
                 ))}
@@ -806,7 +819,7 @@ export function PlanSheet({
               </div>
             )}
             {!editable && plan.note && (
-              <p className="outing-note">{plan.note}</p>
+              <p className="outing-note">{text(plan.note)}</p>
             )}
             <p className="field-help section-footnote">
               {shown.proposal
@@ -817,7 +830,7 @@ export function PlanSheet({
           <section className="sheet-section">
             <div className="section-heading">
               <h2>The cost</h2>
-              <span>Estimated · NGN</span>
+              <span>Estimated · {currency}</span>
             </div>
             <dl className="cost-ledger">
               {shown.proposal ? (
@@ -856,6 +869,12 @@ export function PlanSheet({
                   <dd>{money(total)} total</dd>
                 </div>
               )}
+              {conversionRounding !== 0 && (
+                <div>
+                  <dt>Conversion rounding</dt>
+                  <dd>{format(conversionRounding)}</dd>
+                </div>
+              )}
               <div className="ledger-total">
                 <dt>Estimated total</dt>
                 <dd>
@@ -875,12 +894,12 @@ export function PlanSheet({
                 <dt>
                   {difference >= 0 ? "Remaining in budget" : "Over budget"}
                 </dt>
-                <dd>{money(Math.abs(difference))}</dd>
+                <dd>{moneyDifference(shown.budget, total)}</dd>
               </div>
               {expenses.length > 0 && (
                 <div>
                   <dt>Expenses recorded</dt>
-                  <dd>{money(spent)} total</dd>
+                  <dd>{moneySum(expenses.map((e) => e.amount))} total</dd>
                 </div>
               )}
             </dl>
@@ -916,7 +935,7 @@ export function PlanSheet({
                 <h3>Still to confirm</h3>
                 <ul>
                   {shown.proposal.openQuestions.map((question) => (
-                    <li key={question}>{question}</li>
+                    <li key={question}>{text(question)}</li>
                   ))}
                 </ul>
               </div>
@@ -1025,7 +1044,7 @@ export function PlanSheet({
                   <li key={item.id}>
                     <span className="activity-dot" />
                     <p>
-                      {item.text}
+                      {text(item.text)}
                       <time dateTime={item.at}>
                         {new Date(item.at).toLocaleString("en-GB", {
                           day: "numeric",
@@ -1066,7 +1085,7 @@ export function PlanSheet({
                 Total budget<strong>{money(shown.budget)}</strong>
               </span>
               <span className={difference < 0 ? "error-text" : ""}>
-                {money(Math.abs(difference))}{" "}
+                {moneyDifference(shown.budget, total)}{" "}
                 {difference < 0 ? "over budget" : "remaining"}
               </span>
             </div>
@@ -1095,7 +1114,7 @@ export function PlanSheet({
                 </button>
                 <p className="field-help rail-preview">
                   {live
-                    ? "Your manager can review this in Teamfare. No email is sent."
+                    ? "Your manager can review this in Teamfare. Review emails follow their preferences."
                     : "This records a review request locally. No email is sent."}
                 </p>
               </>
@@ -1143,7 +1162,9 @@ export function PlanSheet({
                   </button>
                 )}
                 <p className="field-help rail-preview">
-                  No booking, payment, or invitation is made here.
+                  {live
+                    ? "Guest emails follow the plan and recipient preferences. Bookings and payments remain external."
+                    : "No booking, payment, or invitation is made here."}
                 </p>
                 {role === "manager" && plan.date < localDate() && (
                   <button

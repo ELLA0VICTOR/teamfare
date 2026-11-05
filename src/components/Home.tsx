@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowRight, Bookmark, ChevronDown, Plus } from "lucide-react";
-import { dateLabel, experiences, localDate, money } from "../data";
+import { dateLabel, experiences, localDate } from "../data";
+import { MoneyInput, useCurrency } from "../currency-context";
 import type { Category, Demo, Experience } from "../data";
 import { needsYou, placeFor, planExperience } from "../plan";
 import type { Role } from "../plan";
@@ -39,6 +40,7 @@ export function Home({
   onExplore: (experience: Experience) => void;
 }) {
   const { live, viewerId } = useTeam();
+  const { money, currency } = useCurrency();
   const [brief, setBrief] = useState("");
   const [people, setPeople] = useState("8");
   const [location, setLocation] = useState("Lagos");
@@ -190,25 +192,13 @@ export function Home({
                 />
               </label>
               <label className="field">
-                Budget per person (₦)
-                <input
-                  required
-                  type="text"
-                  inputMode="numeric"
-                  value={
-                    perPerson === "" ? "" : perPerson.toLocaleString("en-NG")
-                  }
-                  onChange={(e) => {
-                    const raw = e.target.value.replaceAll(",", "");
-                    if (!/^\d*$/.test(raw)) return;
-                    const amount = raw === "" ? "" : Number(raw);
-                    e.target.setCustomValidity(
-                      amount !== "" && (amount < 1 || amount > 5000000)
-                        ? "Enter a budget from 1 to 5,000,000 naira per person."
-                        : "",
-                    );
-                    setPerPerson(amount);
-                  }}
+                Budget per person ({currency === "USD" ? "USD" : "₦"})
+                <MoneyInput
+                  grouped
+                  value={Number(perPerson)}
+                  onValueChange={setPerPerson}
+                  min={1}
+                  max={5000000}
                 />
               </label>
             </div>

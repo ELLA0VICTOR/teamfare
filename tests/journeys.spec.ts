@@ -2,9 +2,11 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() =>
-    sessionStorage.setItem("teamfare-mode", "preview"),
-  );
+  // Preserve the existing NGN-specific journey; USD has separate coverage.
+  await page.addInitScript(() => {
+    sessionStorage.setItem("teamfare-mode", "preview");
+    localStorage.setItem("teamfare-display-currency-v1", "NGN");
+  });
 });
 
 async function switchRole(page: Page, role: "manager" | "employee") {

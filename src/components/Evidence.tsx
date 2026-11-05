@@ -1,6 +1,8 @@
 import type { ResearchOption } from "../research";
+import { useCurrency } from "../currency-context";
 
 export function Evidence({ option }: { option: ResearchOption }) {
+  const { currency, money } = useCurrency();
   return (
     <div className="evidence-block">
       <h3>Sources checked</h3>
@@ -29,11 +31,23 @@ export function Evidence({ option }: { option: ResearchOption }) {
       {option.costs.some((cost) => cost.basis === "published") && (
         <div className="price-quotes">
           <h3>Published figures</h3>
+          {currency === "USD" && (
+            <p className="field-help">
+              Original NGN source quotes; USD equivalents use the dated
+              reference rate.
+            </p>
+          )}
           {option.costs
             .filter((cost) => cost.basis === "published")
             .map((cost, index) => (
               <blockquote key={index}>
                 <p>“{cost.quote}”</p>
+                {currency === "USD" && (
+                  <p>
+                    {money(cost.amount)} equivalent{" "}
+                    {cost.unit === "per_person" ? "per person" : "total"}
+                  </p>
+                )}
                 <span>
                   {cost.label} ·{" "}
                   <a

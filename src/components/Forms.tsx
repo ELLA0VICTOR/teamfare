@@ -5,6 +5,7 @@ import { useTeam } from "../team-context";
 import { Modal } from "./Modal";
 import { localDate } from "../data";
 import type { Expense, Plan } from "../data";
+import { MoneyInput, useCurrency } from "../currency-context";
 
 export function ExpenseForm({
   plans,
@@ -18,6 +19,8 @@ export function ExpenseForm({
   onSubmit: (expense: Expense, receipt?: File) => void | Promise<void>;
 }) {
   const { live, viewerId, members } = useTeam();
+  const { currency } = useCurrency();
+  const [amount, setAmount] = useState(0);
   const viewer = members.find((member) => member.id === viewerId);
   const eligible = plans.filter(
     (plan) =>
@@ -35,8 +38,7 @@ export function ExpenseForm({
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
-    const amount = Number(data.get("amount")),
-      description = String(data.get("description")).trim();
+    const description = String(data.get("description")).trim();
     const date = String(data.get("date")),
       planId = String(data.get("plan"));
     if (
@@ -49,7 +51,7 @@ export function ExpenseForm({
       !eligible.some((plan) => plan.id === planId)
     ) {
       setError(
-        "Choose an approved outing, a valid date, and a positive amount in whole naira.",
+        "Choose an approved outing, a valid date, and a positive amount.",
       );
       return;
     }
@@ -122,15 +124,12 @@ export function ExpenseForm({
           </label>
           <div className="form-grid">
             <label className="field">
-              Amount (NGN)
-              <input
+              Amount ({currency})
+              <MoneyInput
                 name="amount"
-                required
-                type="number"
-                min="1"
-                max="100000000"
-                step="1"
-                placeholder="0"
+                value={amount}
+                onValueChange={setAmount}
+                min={1}
               />
             </label>
             <label className="field">

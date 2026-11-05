@@ -90,6 +90,7 @@ Built for **Vultr Agent Rush — Powering the Future of Work**. The web app, cen
 | Research | Searches and reads real public sources, compares two or three options, retains citations and confirmation questions. |
 | Plan Sheet | Edits the outing, guest list, itinerary and cost assumptions in one document. |
 | Cost ledger | Calculates per-person and fixed costs, total estimate, allowance and remaining budget deterministically. |
+| Display currency | USD by default, with a saved NGN option; converted forms, plans and reports use a dated reference rate. |
 | Manager review | Requires another manager, supports changes with a pinned note, and rejects stale or over-budget approvals. |
 | Coordination | Collects availability replies, ranks proposed times, saves interests, emails opted-in guests and supports RSVP and calendar export. |
 | Expenses | Records actual team entries, attaches private PDF/PNG/JPEG receipts and retains an activity history. |
@@ -230,9 +231,11 @@ Public judge access is an explicit exception for two operator-seeded accounts in
 
 ## Expenses and reporting
 
-Expense rows retain the outing, description, category, payer, whole-NGN amount and date. Employees record their own expenses on eligible outings; managers can choose another teammate. Recording is a database transaction and appends a real activity event. No payment or reimbursement is initiated.
+USD is the default display currency. The header selector also offers NGN and remembers the choice in this browser. This is an explicit display preference, not an automatic assumption based on a person's location. USD inputs convert through the displayed rate; merely switching currency never rewrites records or changes approval limits. Source quotes remain in their original currency. Rates refresh daily when available, retain a dated cached reference during an outage, and are attributed to [ExchangeRate-API](https://www.exchangerate-api.com/docs/free).
 
-The team overview shows recorded spending against active-outing budgets. The report beneath it filters by outing and inclusive **From date / To date**, with its own record count and total. Invalid ranges are announced and cannot be exported. CSV uses the same filtered rows, preserves its six columns and quotes fields while escaping spreadsheet formula prefixes. Cancelled outing records remain inspectable. Settling a past outing closes further expense recording.
+Expense rows retain the outing, description, category, payer, whole-NGN source amount and date. Employees record their own expenses on eligible outings; managers can choose another teammate. Recording is a database transaction and appends a real activity event. No payment or reimbursement is initiated.
+
+The team overview shows recorded spending against active-outing budgets. The report beneath it filters by outing and inclusive **From date / To date**, with its own record count and total. Invalid ranges are announced and cannot be exported. CSV uses the same filtered rows and escapes spreadsheet formula prefixes. NGN exports retain the original six columns; USD exports include dollar amounts, original amounts and the exact rate, date and source. Emailed reports use the same selected currency and stored rate snapshot. Cancelled outing records remain inspectable. Settling a past outing closes further expense recording.
 
 Receipts accept PDF, PNG or JPEG up to 5 MB, with file-signature validation, 100 MB per team and 512 MB for the deployment. Only the expense creator, payer or a manager can access them. Files are downloaded as attachments and stored inside private SQLite backups. Settled/cancelled outings retain downloads but reject attachment changes. No OCR or malware-scanning claim is made.
 

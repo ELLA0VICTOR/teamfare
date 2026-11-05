@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { api, ApiError } from "../api";
-import { dateLabel, money } from "../data";
+import { dateLabel } from "../data";
+import { useCurrency } from "../currency-context";
 import type { Plan } from "../data";
 import { costTotal } from "../research";
 import type { AgentSetup, ResearchRun } from "../research";
@@ -28,6 +29,7 @@ export function ResearchPanel({
   onRestart: (values: ComposerValues) => void;
   onExpired: () => void;
 }) {
+  const { money, text } = useCurrency();
   const [run, setRun] = useState<ResearchRun | null>(null),
     [setup, setSetup] = useState<AgentSetup | null>(null),
     [error, setError] = useState(""),
@@ -214,7 +216,7 @@ export function ResearchPanel({
               {run.events.map((event, index) => (
                 <li key={index}>
                   <Check size={15} aria-hidden="true" />
-                  <span>{event.text}</span>
+                  <span>{text(event.text)}</span>
                   <time>
                     {new Date(event.at).toLocaleTimeString("en-GB", {
                       hour: "2-digit",
@@ -254,7 +256,7 @@ export function ResearchPanel({
             <>
               <div className="research-summary">
                 <h2>Options worth considering</h2>
-                <p>{run.result.summary}</p>
+                <p>{text(run.result.summary)}</p>
               </div>
               {run.selectedPlanId && (
                 <div className="research-notice">
@@ -287,8 +289,8 @@ export function ResearchPanel({
                           {option.duration}
                         </p>
                       </div>
-                      <p>{option.summary}</p>
-                      <p className="option-reason">{option.reason}</p>
+                      <p>{text(option.summary)}</p>
+                      <p className="option-reason">{text(option.reason)}</p>
                       <dl className="cost-ledger">
                         <div className="ledger-total">
                           <dt>Estimate · total</dt>
@@ -342,7 +344,7 @@ export function ResearchPanel({
                             <time>{item.time}</time>
                             <p>
                               <strong>{item.title}</strong>
-                              <span>{item.details}</span>
+                              <span>{text(item.details)}</span>
                             </p>
                           </div>
                         ))}
@@ -355,7 +357,7 @@ export function ResearchPanel({
                         <h3>Still to confirm</h3>
                         <ul>
                           {option.openQuestions.map((question) => (
-                            <li key={question}>{question}</li>
+                            <li key={question}>{text(question)}</li>
                           ))}
                         </ul>
                       </div>

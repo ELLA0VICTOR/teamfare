@@ -25,6 +25,8 @@ export function AvailabilityPanel({
     [answers, setAnswers] = useState<string[]>([]),
     [acknowledged, setAcknowledged] = useState(false);
   const version = useRef(-1);
+  const generation = useRef(0);
+  const saving = useRef(false);
   const tomorrow = new Date(`${plan.date}T12:00:00+01:00`);
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const [slots, setSlots] = useState([
@@ -41,12 +43,23 @@ export function AvailabilityPanel({
   ]);
   useEffect(() => {
     const lifecycle = new AbortController();
+    const lifecycleGeneration = generation;
+    version.current = -1;
+    generation.current++;
+    saving.current = false;
     async function load() {
+      const requestedGeneration = generation.current;
       try {
         const result = await api<Availability>(
           `/plans/${plan.id}/availability`,
         );
-        if (lifecycle.signal.aborted) return;
+        if (
+          lifecycle.signal.aborted ||
+          saving.current ||
+          requestedGeneration !== generation.current ||
+          result.version < version.current
+        )
+          return;
         setPoll(result);
         if (version.current !== result.version) {
           version.current = result.version;
@@ -69,27 +82,38 @@ export function AvailabilityPanel({
     }, 8000);
     return () => {
       lifecycle.abort();
+      lifecycleGeneration.current++;
       clearInterval(timer);
     };
   }, [plan.id, viewerId]);
   async function perform(path: string, data: unknown) {
+    const requestedGeneration = ++generation.current;
+    saving.current = true;
     setBusy(true);
     setError("");
     try {
-      setPoll(
-        await api<Availability>(
-          `/plans/${plan.id}/availability${path}`,
-          data,
-          csrf,
-        ),
+      const result = await api<Availability>(
+        `/plans/${plan.id}/availability${path}`,
+        data,
+        csrf,
+      );
+      if (requestedGeneration !== generation.current) return;
+      version.current = result.version;
+      setPoll(result);
+      setAnswers(
+        result.replies.find((r) => r.userId === viewerId)?.available ?? [],
       );
       setEditing(false);
     } catch (e) {
+      if (requestedGeneration !== generation.current) return;
       setError(
         e instanceof Error ? e.message : "Availability could not be saved.",
       );
     } finally {
-      setBusy(false);
+      if (requestedGeneration === generation.current) {
+        saving.current = false;
+        setBusy(false);
+      }
     }
   }
   const own = poll?.replies.find((r) => r.userId === viewerId),

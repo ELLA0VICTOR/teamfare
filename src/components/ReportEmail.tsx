@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useTeam } from "../team-context";
 import type { ReportFilter } from "../workflows";
 import { DeliveryStatus } from "./DeliveryStatus";
+import { useCurrency } from "../currency-context";
 export function ReportEmail({
   filter,
   csrf,
@@ -10,6 +11,7 @@ export function ReportEmail({
   filter: ReportFilter;
   csrf: string;
 }) {
+  const { currency, quote } = useCurrency();
   const { members, viewerId } = useTeam(),
     [recipient, setRecipient] = useState(viewerId),
     [busy, setBusy] = useState(false),
@@ -32,7 +34,13 @@ export function ReportEmail({
           try {
             const result = await api<{ id: string; status: string }>(
               "/reports/expenses/email",
-              { ...filter, recipientId: recipient, requestId },
+              {
+                ...filter,
+                recipientId: recipient,
+                requestId,
+                currency,
+                quoteId: quote.id,
+              },
               csrf,
             );
             if (result.status === "failed" || result.status === "suppressed")

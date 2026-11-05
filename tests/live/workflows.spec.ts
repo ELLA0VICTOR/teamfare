@@ -17,6 +17,14 @@ test("real member UI coordinates availability, invitations, calendar, receipts a
       baseURL: origin,
       viewport: { width: 390, height: 844 },
     });
+  // These existing assertions exercise the retained NGN entry mode.
+  await Promise.all(
+    [managerContext, employeeContext].map((context) =>
+      context.addInitScript(() =>
+        localStorage.setItem("teamfare-display-currency-v1", "NGN"),
+      ),
+    ),
+  );
   const managerEmail = `workflow-manager-${suffix}@example.test`,
     employeeEmail = `workflow-employee-${suffix}@example.test`;
   const managerResponse = await verifiedAccount(
@@ -94,6 +102,10 @@ test("real member UI coordinates availability, invitations, calendar, receipts a
       employee.getByText("0 of 2 named guests replied."),
     ).toBeVisible();
     await employee.getByLabel("Works for me").first().check();
+    // Cross the background refresh interval after creating the poll. A fresh
+    // checkbox selection must survive before the organiser saves their reply.
+    await employee.waitForTimeout(8500);
+    await expect(employee.getByLabel("Works for me").first()).toBeChecked();
     await employee
       .getByRole("button", { name: "Save availability", exact: true })
       .click();
@@ -142,13 +154,11 @@ test("real member UI coordinates availability, invitations, calendar, receipts a
       .getByLabel("Description", { exact: true })
       .fill("=Receipt-backed meal");
     await employee.getByLabel("Amount (NGN)").fill("12000");
-    await employee
-      .getByLabel("Receipt (optional)")
-      .setInputFiles({
-        name: "meal-receipt.pdf",
-        mimeType: "application/pdf",
-        buffer: Buffer.from("%PDF-1.4\nPrivate receipt fixture\n%%EOF"),
-      });
+    await employee.getByLabel("Receipt (optional)").setInputFiles({
+      name: "meal-receipt.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4\nPrivate receipt fixture\n%%EOF"),
+    });
     await employee
       .getByRole("button", { name: "Record expense", exact: true })
       .click();

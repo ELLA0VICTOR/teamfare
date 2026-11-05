@@ -1,0 +1,11 @@
+# Final USD recording
+
+The previous submission video exports were replaced with the new USD edit. `Teamfare-demo.mp4` is **130.8 seconds (2:10.8)**, 1920×1080, 30 fps, H.264/AAC, approximately 17 MB. It is below the three-minute limit.
+
+The full supplied `team.mp3` narration is retained at its original speed and pitch. No audio filters, volume changes, added pauses or sentence cuts are applied. `Teamfare-voiceover-original.mp3` matches the supplied file byte-for-byte. `Teamfare-visuals.mp4` contains the same silent edit, and `Teamfare-captions.srt` matches the new speech. All three current script files contain the 415-word USD narration.
+
+The recording was made on 5 November 2026 from https://teamfare.dixmail.xyz, using separate public organiser and manager accounts. Research run `4b2816ea-7aa3-49f9-9baa-eca49d760d3b` returned three real options and saved plan `6d20f3bc-0b2e-45b5-9bf2-81ed6f8ccee4`. The budget is $22.28 per person for four people; the sample expense and attached demonstration receipt are $8.91. Both named guests replied before the time was chosen. The manager approved, attendance persisted, the receipt was saved, and the calendar and filtered USD CSV downloaded. These results were checked again after reloading the live application.
+
+Screen actions play at normal speed. The edit omits idle waits and repetitive entries, with a visible label for the shortened research wait. It does not fabricate app states or provider output. The architecture explanation uses the approved slide 8 diagram with service highlights. Shared judge accounts disable external email; the original narration explains this and the video labels it. No booking or payment occurred.
+
+Validation: all capture actions passed with no browser page errors; workflow persistence passed; the entire MP4 decoded; 1080p/30 fps and H.264/AAC were verified; duration was checked against 180 seconds; no unexpected black screens were found; 32 representative frames were reviewed. Rendered audio compared against the new original has head/tail correlations above 0.99998 and zero timing offset, confirming no tempo or pitch change. Private source/session files remain excluded from Git. No media has been uploaded or submitted to the hackathon automatically.

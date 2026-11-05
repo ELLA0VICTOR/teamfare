@@ -14,6 +14,14 @@ test("two actual accounts share an outing, enforce review, RSVP, record spending
     employeeContext = await browser.newContext({
       viewport: { width: 390, height: 844 },
     });
+  // These existing assertions exercise the retained NGN entry mode.
+  await Promise.all(
+    [managerContext, employeeContext].map((context) =>
+      context.addInitScript(() =>
+        localStorage.setItem("teamfare-display-currency-v1", "NGN"),
+      ),
+    ),
+  );
   const manager = await managerContext.newPage(),
     employee = await employeeContext.newPage();
   const errors: string[] = [];

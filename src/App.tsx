@@ -32,10 +32,15 @@ import {
   loadDemo,
   localDate,
   members,
-  money,
+  money as sourceMoney,
   storageKey,
 } from "./data";
 import type { Demo, Experience, Expense, Plan, View } from "./data";
+import {
+  CurrencyNotice,
+  CurrencySwitch,
+  useCurrency,
+} from "./currency-context";
 import {
   event,
   needsYou,
@@ -83,6 +88,7 @@ export default function App({
   connection?: Connection;
   onExit: () => void;
 }) {
+  const { money, currency, quote, moneySum } = useCurrency();
   const live = !!connection;
   const [demo, setDemo] = useState<Demo>(() => connection?.state ?? loadDemo());
   const [previewRole, setRole] = useState<Role>("employee");
@@ -527,7 +533,7 @@ export default function App({
               events: [
                 ...(plan.events ?? []),
                 event(
-                  `${expense.payer} recorded ${money(expense.amount)} for ${expense.description}.`,
+                  `${expense.payer} recorded ${sourceMoney(expense.amount)} for ${expense.description}.`,
                 ),
               ],
             }
@@ -543,7 +549,7 @@ export default function App({
       return;
     }
     const url = URL.createObjectURL(
-      new Blob([expenseCsv(visibleExpenses, demo.plans)], {
+      new Blob([expenseCsv(visibleExpenses, demo.plans, { currency, quote })], {
         type: "text/csv;charset=utf-8",
       }),
     );
@@ -601,6 +607,7 @@ export default function App({
               {navLinks}
             </nav>
             <div className="account" ref={profile}>
+              <CurrencySwitch />
               <span className="team-name">{teamName}</span>
               <button
                 className="account-button"
@@ -975,8 +982,17 @@ export default function App({
               </header>
               <div className="expense-summary">
                 <p>
-                  <strong>{money(spent)}</strong> recorded against{" "}
-                  {money(budget)} total budget.
+                  <strong>
+                    {moneySum(
+                      demo.expenses
+                        .filter((e) =>
+                          activePlans.some((p) => p.id === e.planId),
+                        )
+                        .map((e) => e.amount),
+                    )}
+                  </strong>{" "}
+                  recorded against {moneySum(activePlans.map((p) => p.budget))}{" "}
+                  total budget.
                 </p>
                 <SpendBar spent={spent} budget={budget} />
                 <span>
@@ -1046,12 +1062,7 @@ export default function App({
                 <p className="field-help">
                   {visibleExpenses.length}{" "}
                   {visibleExpenses.length === 1 ? "expense" : "expenses"} ·{" "}
-                  {money(
-                    visibleExpenses.reduce(
-                      (sum, expense) => sum + expense.amount,
-                      0,
-                    ),
-                  )}{" "}
+                  {moneySum(visibleExpenses.map((expense) => expense.amount))}{" "}
                   recorded total in this report. Dates include both endpoints;
                   CSV follows these filters.
                 </p>
@@ -1111,8 +1122,8 @@ export default function App({
                         </div>
                         <div className="group-spend">
                           <span>
-                            Recorded {money(recorded)} total / Budget{" "}
-                            {money(plan.budget)} total
+                            Recorded {moneySum(records.map((e) => e.amount))}{" "}
+                            total / Budget {money(plan.budget)} total
                           </span>
                           <SpendBar spent={recorded} budget={plan.budget} />
                         </div>
@@ -1156,6 +1167,7 @@ export default function App({
           )}
         </main>
         <footer className="site-footer page-width">
+          <CurrencyNotice />
           <span>Time together. Well spent.</span>
           <div>
             <button onClick={() => setDialog({ type: "about" })}>

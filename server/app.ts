@@ -21,6 +21,7 @@ import { digest, hashPassword, sessionCookie, token } from "./auth.ts";
 import { WorkflowError, WorkflowService } from "./workflow-service.ts";
 import { registerWorkflowRoutes } from "./workflow-routes.ts";
 import { outingStart } from "../src/workflows.ts";
+import { CurrencyService } from "./currency.ts";
 
 class HttpError extends Error {
   statusCode: number;
@@ -312,10 +313,16 @@ export async function createApp(
       return saved;
     });
   }
+  const currencies = new CurrencyService(store);
+  app.get("/api/currency", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=300");
+    return currencies.current();
+  });
   registerWorkflowRoutes(app, store, workflows, {
     authenticate,
     planFor,
     write,
+    currencies,
   });
   app.get("/api/health", async () => {
     store.db

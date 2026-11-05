@@ -16,8 +16,11 @@ import {
 } from "../src/workflows.ts";
 import { WorkflowError, WorkflowService } from "./workflow-service.ts";
 import { digest } from "./auth.ts";
+import type { CurrencyService } from "./currency.ts";
+import { displayAmount, formatAmount } from "../src/currency.ts";
 
 type Context = {
+  currencies: CurrencyService;
   authenticate: (
     request: FastifyRequest,
     mutation?: boolean,
@@ -496,11 +499,19 @@ export function registerWorkflowRoutes(
     if (user.role !== "manager" || store.isJudge(user))
       fail(403, "Only a private team's manager can email expense reports.");
     const input = filters
-      .extend({ recipientId: z.string().max(80), requestId: z.uuid() })
+      .extend({
+        recipientId: z.string().max(80),
+        requestId: z.uuid(),
+        currency: z.enum(["USD", "NGN"]).default("NGN"),
+        quoteId: z.string().min(1).max(120).optional(),
+      })
       .strict()
       .parse(request.body);
     if (input.from && input.to && input.from > input.to)
       fail(400, "The end date must be on or after the start date.");
+    const quote = ctx.currencies.quote(input.quoteId);
+    if (input.currency === "USD" && !quote)
+      fail(400, "Refresh the currency rate before emailing this report.");
     return store.transaction(() => {
       const requestHash = createHash("sha256")
         .update(
@@ -508,6 +519,8 @@ export function registerWorkflowRoutes(
             planId: input.planId ?? null,
             from: input.from ?? null,
             to: input.to ?? null,
+            currency: input.currency,
+            quoteId: input.currency === "USD" ? quote!.id : null,
             recipientId: input.recipientId,
           }),
         )
@@ -548,17 +561,25 @@ export function registerWorkflowRoutes(
         fail(400, "There are no matching expenses to email.");
       if (expenses.length > 2000)
         fail(400, "Narrow the date range to at most 2,000 expenses.");
-      const csv = expenseCsv(expenses, state.plans);
+      const csv = expenseCsv(
+        expenses,
+        state.plans,
+        quote ? { currency: input.currency, quote } : undefined,
+      );
       if (Buffer.byteLength(csv) > 1024 * 1024)
         fail(400, "Narrow this report to less than 1 MB.");
       const total = expenses.reduce((n, e) => n + e.amount, 0);
+      const amountLine =
+        input.currency === "USD"
+          ? `${formatAmount(expenses.reduce((sum, e) => sum + Math.round(displayAmount(e.amount, "USD", quote!) * 100), 0) / 100, "USD")} USD equivalent; NGN ${total.toLocaleString("en-NG")} original total. Reference rate: 1 USD = ${quote!.ngnPerUsd} NGN, updated ${quote!.updatedAt}. Source: ${quote!.source}`
+          : `NGN ${total.toLocaleString("en-NG")} total.`;
       const id = workflow.enqueue({
         teamId: user.team_id,
         recipient,
         kind: "expense_report",
         dedupe: `report/${user.id}/${input.requestId}`,
         subject: "Teamfare expense report",
-        text: `${user.name} requested this expense report for you.\nExpense dates: ${input.from ?? "all dates"} to ${input.to ?? "all dates"} (inclusive).\n${expenses.length} records; NGN ${total.toLocaleString("en-NG")} total.\nThe attached CSV contains the selected records. No payment or reimbursement has been initiated.`,
+        text: `${user.name} requested this expense report for you.\nExpense dates: ${input.from ?? "all dates"} to ${input.to ?? "all dates"} (inclusive).\n${expenses.length} records; ${amountLine}\nThe attached CSV contains the selected records. No payment or reimbursement has been initiated.`,
         attachments: [
           {
             filename: "teamfare-expenses.csv",
