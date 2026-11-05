@@ -4,22 +4,28 @@
 
 <h1 align="center">Teamfare</h1>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Node.js-24_LTS-5FA04E?style=for-the-badge&logo=nodedotjs&labelColor=20232A" alt="Node.js 24 LTS" />
+  <img src="https://img.shields.io/badge/TypeScript-7-3178C6?style=for-the-badge&logo=typescript&labelColor=20232A" alt="TypeScript 7" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&labelColor=20232A" alt="React 19" />
+  <img src="https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&labelColor=20232A" alt="Vite 8" />
+  <img src="https://img.shields.io/badge/Fastify-5-000000?style=for-the-badge&logo=fastify&labelColor=20232A" alt="Fastify 5" />
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/Vultr-Cloud_Compute-007BFC?style=for-the-badge&labelColor=20232A" alt="Vultr Cloud Compute" />
+  <img src="https://img.shields.io/badge/Vultr-Serverless_Inference-007BFC?style=for-the-badge&labelColor=20232A" alt="Vultr Serverless Inference" />
+  <img src="https://img.shields.io/badge/Vultr-Object_Storage-007BFC?style=for-the-badge&labelColor=20232A" alt="Vultr Object Storage" />
+  <img src="https://img.shields.io/badge/SQLite-Persistent-003B57?style=for-the-badge&logo=sqlite&labelColor=20232A" alt="SQLite Persistent" />
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/Tavily-Search_%2B_Extract-0055FF?style=for-the-badge&labelColor=20232A" alt="Tavily Search and Extract" />
+  <img src="https://img.shields.io/badge/Resend-Email-000000?style=for-the-badge&labelColor=20232A" alt="Resend Email" />
+  <img src="https://img.shields.io/badge/Docker-Containers-2496ED?style=for-the-badge&logo=docker&labelColor=20232A" alt="Docker Containers" />
+  <img src="https://img.shields.io/badge/Caddy-HTTPS-1F4D3A?style=for-the-badge&labelColor=20232A" alt="Caddy HTTPS" />
+  <img src="https://img.shields.io/badge/License-MIT-1F4D3A?style=for-the-badge&labelColor=20232A" alt="License MIT" />
+</p>
+
 <p align="center"><strong>Bring your team together. Leave the admin to us.</strong></p>
-
-## Judge access — no signup needed
-
-Open **[Teamfare](https://teamfare.dixmail.xyz)** and sign in with either public account:
-
-| Account | Email | Password |
-| --- | --- | --- |
-| Organiser / employee | `organiser@judges.teamfare.invalid` | `TeamfareOrganiser2026!` |
-| Manager | `manager@judges.teamfare.invalid` | `TeamfareManager2026!` |
-
-Both accounts belong to the same **Teamfare · Judge team**. Use a normal window and a private window, or separate browser profiles, to try both roles together. These two seeded accounts require **no signup or email code**. The `.invalid` addresses are deliberate demo identifiers, not real inboxes. Ordinary accounts still require email ownership verification and a code at sign-in.
-
-The team includes labelled sample outings, a proposal awaiting approval, and expense records. Start a fresh plan as the organiser to try the complete workflow; the manager cannot approve a plan they organised themselves. Shared records are visible to other judges, so use sample information. Shared passwords cannot be changed, invitations are disabled, and each judge account shares its four-research-runs-per-hour allowance with other visitors. The local sample-team preview remains available without using provider credits.
-
-For local setup, run `npm run seed:judges` once after configuring the application. Operators can run that same command inside the deployed app container. Rerunning it preserves existing judge credentials and activity and refuses conflicting account identities. Judge provisioning never marks a real account as a demo account.
 
 <p align="center">
   A team outing, from a rough idea to a reviewed plan and a clear expense record.<br />
@@ -35,18 +41,20 @@ For local setup, run `npm run seed:judges` once after configuring the applicatio
   <a href="#license">License</a>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Node.js-24_LTS-5FA04E?style=for-the-badge&logo=nodedotjs&labelColor=20232A" alt="Node.js 24 LTS" />
-  <img src="https://img.shields.io/badge/TypeScript-7-3178C6?style=for-the-badge&logo=typescript&labelColor=20232A" alt="TypeScript 7" />
-  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&labelColor=20232A" alt="React 19" />
-  <img src="https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&labelColor=20232A" alt="Vite 8" />
-</p>
-<p align="center">
-  <img src="https://img.shields.io/badge/Vultr-Cloud_Compute-007BFC?style=for-the-badge&labelColor=20232A" alt="Vultr Cloud Compute" />
-  <img src="https://img.shields.io/badge/Vultr-Serverless_Inference-007BFC?style=for-the-badge&labelColor=20232A" alt="Vultr Serverless Inference" />
-  <img src="https://img.shields.io/badge/SQLite-Persistent-003B57?style=for-the-badge&logo=sqlite&labelColor=20232A" alt="SQLite persistence" />
-  <img src="https://img.shields.io/badge/License-MIT-1F4D3A?style=for-the-badge&labelColor=20232A" alt="MIT license" />
-</p>
+## Judge access — no signup needed
+
+Open **[Teamfare](https://teamfare.dixmail.xyz)** and sign in with either public account:
+
+| Account | Email | Password |
+| --- | --- | --- |
+| Organiser / employee | `organiser@judges.teamfare.invalid` | `TeamfareOrganiser2026!` |
+| Manager | `manager@judges.teamfare.invalid` | `TeamfareManager2026!` |
+
+Both accounts belong to the same **Teamfare · Judge team**. Use a normal window and a private window, or separate browser profiles, to try both roles together. These two seeded accounts require **no signup or email code**. The `.invalid` addresses are deliberate demo identifiers, not real inboxes. Ordinary accounts still require email ownership verification and a code at sign-in.
+
+The team includes labelled sample outings, a proposal awaiting approval, and expense records. Start a fresh plan as the organiser to try the complete workflow; the manager cannot approve a plan they organised themselves. Shared records are visible to other judges, so use sample information. Shared passwords cannot be changed, invitations are disabled, and each judge account shares its four-research-runs-per-hour allowance with other visitors. The local sample-team preview remains available without using provider credits.
+
+For local setup, run `npm run seed:judges` once after configuring the application. Operators can run that same command inside the deployed app container. Rerunning it preserves existing judge credentials and activity and refuses conflicting account identities. Judge provisioning never marks a real account as a demo account.
 
 ---
 
