@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "engines": { "node": ">=24.19.0 <25" },
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "node --watch --env-file-if-exists=.env server/index.ts",
@@ -14,6 +16,7 @@
     "test:live": "playwright test -c playwright.live.config.ts",
     "test:agent": "playwright test -c playwright.agent.config.ts",
     "agent:models": "node server/agent/models.ts",
+    "seed:judges": "node --env-file-if-exists=.env server/seed-judges.ts",
     "lint": "oxlint",
     "preview": "vite preview",
     "test:browser": "playwright test",
@@ -42,5 +45,6 @@
     "prettier": "^3.9.10",
     "typescript": "~7.0.2",
     "vite": "^8.3.5"
-  }
+  },
+  "license": "MIT"
 }

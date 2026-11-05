@@ -43,6 +43,8 @@ export type Plan = {
   revision?: number;
   unitPrice?: number;
   proposal?: ResearchedProposal;
+  durationMinutes?: number;
+  emailGuests?: boolean;
 };
 export type PlanEvent = {
   id: string;
@@ -57,6 +59,9 @@ export type Expense = {
   payer: string;
   date: string;
   category: string;
+  receipt?: import("./workflows.ts").Receipt;
+  createdBy?: string;
+  payerId?: string;
 };
 export type Demo = {
   version: 1;

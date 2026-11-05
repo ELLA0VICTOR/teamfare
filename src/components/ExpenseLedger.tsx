@@ -1,7 +1,18 @@
 import { dateLabel, money } from "../data";
 import type { Expense } from "../data";
+import { ReceiptControl } from "./ReceiptControl";
 
-export function ExpenseLedger({ expenses }: { expenses: Expense[] }) {
+export function ExpenseLedger({
+  expenses,
+  csrf,
+  onChanged,
+  locked = false,
+}: {
+  expenses: Expense[];
+  csrf?: string;
+  onChanged?: () => Promise<void>;
+  locked?: boolean;
+}) {
   return expenses.length ? (
     <table className="expense-table">
       <caption className="sr-only">Recorded expenses</caption>
@@ -18,7 +29,17 @@ export function ExpenseLedger({ expenses }: { expenses: Expense[] }) {
         {expenses.map((expense) => (
           <tr key={expense.id}>
             <td className="expense-date">{dateLabel(expense.date)}</td>
-            <td className="expense-description">{expense.description}</td>
+            <td className="expense-description">
+              {expense.description}
+              {csrf && onChanged && (
+                <ReceiptControl
+                  expense={expense}
+                  csrf={csrf}
+                  onChanged={onChanged}
+                  locked={locked}
+                />
+              )}
+            </td>
             <td className="expense-category">{expense.category}</td>
             <td className="expense-payer">{expense.payer}</td>
             <td className="amount">

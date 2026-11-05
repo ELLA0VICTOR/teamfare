@@ -43,11 +43,11 @@ Restart `npm run dev` after editing the environment file. On Windows, use `npm.c
 
 Sign in to a real team, describe an outing of at least ten characters, choose a future date, location, headcount and per-person allowance, and select **Research options**. The agent searches and reads public pages, then compares two or three sourced options. Provider errors appear as failures; sample venues are never substituted for failed research.
 
-Inspect the linked sources, cost assumptions and questions still requiring confirmation. **Use this plan** creates a draft. Edit its headcount, costs, itinerary and named teammates before submitting it for a different manager's approval. Approval never books a venue or sends invitations.
+Inspect the linked sources, cost assumptions and questions still requiring confirmation. **Use this plan** creates a draft. Edit its headcount, costs, itinerary and named teammates before submitting it for a different manager's approval. Approval never books a venue. With guest email enabled, authenticated approval queues invitations for opted-in named teammates; the research model cannot send them.
 
 Missing keys are reported by name without revealing values. For credential/access errors, check the corresponding provider dashboard. For credit/rate-limit errors, check billing before retrying. Cancelled runs can still incur charges for provider work already started.
 
-Runs are bounded to three minutes, twelve model turns (the last three reserved for submission/correction), four searches and three extraction calls of at most four URLs each. Completions require tool calls and have an 8,192-token limit including a 1,024-token reasoning budget at low effort. Choose a model supporting those reasoning controls; the configured Qwen model advertises budget support. Truncated output is rejected. Each user can start four runs per hour, one at a time; the process permits two concurrent runs. These are usage limits, not a guaranteed currency spending cap. Check provider usage dashboards.
+Runs are bounded to three minutes, twelve model turns (the last three reserved for submission/correction), four searches and three extraction calls of at most four URLs each. Completions require tool calls and have an 8,192-token limit including a 1,024-token reasoning budget at low effort. Choose a model supporting those reasoning controls; the configured Qwen model advertises budget support. Truncated output is rejected. Each user can start four runs per hour, one at a time; the process permits two concurrent runs. Persistent daily UTC limits also allow ten starts per team and twenty across the deployment. These are usage limits, not a guaranteed currency spending cap. Check provider usage dashboards.
 
 ## Verification status
 

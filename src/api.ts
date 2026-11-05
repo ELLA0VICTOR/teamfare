@@ -32,3 +32,35 @@ export async function api<T>(
   return result as T;
 }
 export const getSession = () => api<Connection | { user: null }>("/session");
+export async function uploadReceipt(
+  expenseId: string,
+  file: File,
+  csrf: string,
+) {
+  if (
+    !file.size ||
+    file.size > 5 * 1024 * 1024 ||
+    !["image/png", "image/jpeg", "application/pdf"].includes(file.type)
+  )
+    throw new Error("Choose a PDF, JPEG or PNG receipt up to 5 MB.");
+  const response = await fetch(
+    `/api/expenses/${encodeURIComponent(expenseId)}/receipt`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": file.type,
+        "X-CSRF-Token": csrf,
+        "X-Receipt-Name": encodeURIComponent(file.name),
+      },
+      body: file,
+    },
+  );
+  const result = await response.json();
+  if (!response.ok)
+    throw new ApiError(
+      response.status,
+      result.error ?? "Receipt upload failed.",
+    );
+  return result;
+}

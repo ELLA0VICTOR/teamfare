@@ -1529,14 +1529,28 @@ main:focus {
   background: var(--error);
 }
 .expense-tools {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(2, minmax(140px, 1fr));
   justify-content: space-between;
   align-items: end;
   gap: 24px;
   padding: 32px 0 40px;
 }
 .expense-tools .field {
-  width: min(360px, 100%);
+  width: 100%;
+}
+.expense-tools > p,
+.expense-tools > button,
+.expense-report-line {
+  grid-column: 1 / -1;
+}
+.expense-tools > button {
+  justify-self: start;
+}
+.judge-notice {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 24px;
 }
 .select-control {
   display: block;
@@ -2411,6 +2425,9 @@ main:focus {
   .expense-tools .field {
     width: 100%;
   }
+  .expense-tools .field + .field {
+    margin-top: 16px;
+  }
   .expense-tools > p {
     margin-top: 12px;
   }
@@ -2541,4 +2558,154 @@ main:focus {
 .account-form button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+.check-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.check-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+.availability-options {
+  border-top: 1px solid var(--rule);
+  margin: 20px 0;
+}
+.availability-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.availability-row > div:first-child {
+  flex: 1;
+}
+.availability-row strong,
+.availability-row span {
+  display: block;
+}
+.availability-row span {
+  color: var(--ink-2);
+  font-size: 14px;
+  margin-top: 4px;
+}
+.availability-editor {
+  padding-top: 20px;
+}
+.availability-editor .form-grid {
+  border-top: 1px solid var(--rule);
+  padding-top: 20px;
+  margin-bottom: 24px;
+}
+.availability-section details {
+  margin: 20px 0;
+}
+.calendar-export {
+  margin: 0 0 28px;
+}
+.delivery-list {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.delivery-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid var(--rule);
+  padding: 16px 0;
+  overflow-wrap: anywhere;
+}
+.delivery-list li div {
+  min-width: 0;
+}
+.delivery-list li strong,
+.delivery-list li span,
+.delivery-list li small {
+  display: block;
+}
+.delivery-list li strong {
+  font-size: 14px;
+  text-transform: capitalize;
+}
+.delivery-list li span {
+  font-size: 14px;
+}
+.delivery-list li small {
+  color: var(--ink-2);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.delivery-section,
+.invite-email,
+.invitation-actions {
+  margin-top: 32px;
+  border-top: 1px solid var(--rule);
+  padding-top: 24px;
+}
+.report-email > h2,
+.invite-email h3 {
+  font-family: var(--serif);
+}
+.receipt-control {
+  margin-top: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.receipt-control a,
+.receipt-control button,
+.receipt-picker {
+  min-height: 44px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 12px;
+}
+.receipt-picker {
+  position: relative;
+  color: var(--forest);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.receipt-picker input {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  inset: 0;
+}
+.receipt-picker:focus-within {
+  outline: 2px solid var(--forest);
+  outline-offset: 2px;
+}
+.receipt-control .form-error {
+  display: block;
+}
+@media (max-width: 700px) {
+  .availability-row,
+  .delivery-list li {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .availability-row .button {
+    align-self: flex-start;
+  }
+  .receipt-control {
+    width: 100%;
+  }
+  .receipt-control a,
+  .receipt-control button {
+    white-space: normal;
+    text-align: left;
+  }
 }

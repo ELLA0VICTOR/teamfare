@@ -7,6 +7,10 @@
 - **Storage:** Node's built-in SQLite API. Schema version 1 creates tables for teams, users, sessions, invitations, plans, expenses and saved ideas; version 2 adds research runs; versions 3 and 4 add email verification, account challenges, notification outbox, audit events, persisted limits and session inactivity tracking. WAL mode and a five-second busy timeout support a single VM process with concurrent requests. No hosted database service or service-role browser key is needed.
 - **Permissions:** every protected endpoint resolves the server session and team. The client cannot assign an existing team's role or supply authoritative approval, audit history, plan identity or unit price.
 
+Schema version 5 adds explicit operator-seeded judge markers. It preserves existing accounts and sessions; normal signup cannot grant public judge status. Expense reporting supports inclusive date ranges and exports the same filtered rows shown in the ledger.
+
+Schema version 6 adds email preferences/interests, the encrypted workflow outbox, versioned availability replies, private receipt bytes and idempotent expense requests. Existing accounts, credentials and sessions survive. See [coordination and expense rules/API](WORKFLOWS.md).
+
 ```mermaid
 flowchart LR
     Browser[Employee or manager browser] -->|HTTPS and session cookie| Proxy[HTTPS reverse proxy on Vultr]
@@ -21,15 +25,15 @@ This is a single-instance deployment on Vultr. It has not been load-tested for a
 
 ## Identity and sessions
 
-Creating a team creates its first manager only after email ownership verification. Joining an existing team requires a server-issued invitation; the invitation carries the permitted role. Only a manager can create employee or manager invitations. Each code is a random 32-byte value, expires after three days and is consumed atomically once. Only its SHA-256 digest is stored; share the displayed code directly with its intended recipient.
+Creating a team creates its first manager only after email ownership verification. Joining an existing team requires a server-issued invitation; the invitation carries the permitted role. Only a manager can create employee or manager invitations. Each code is a random 32-byte value, expires after three days and is consumed atomically once. The invitation table stores its SHA-256 digest; share the displayed code directly or email it to a specific recipient. Emailing binds the invite to that address and stores its delivery payload encrypted in the workflow outbox.
 
 New passwords require 15–128 characters and use salted scrypt (`N=32768`, `r=8`, `p=1`, 64-byte output). A dummy hash calculation is used for unknown-user login attempts. No passwords or request bodies are logged.
 
 Sessions use random 32-byte cookies, with only their SHA-256 digest in the database. Sessions expire after seven days or thirty minutes without an authenticated request. Cookies are HttpOnly, SameSite=Lax and host-only; production also sets Secure. Signing in replaces the presented session, and signing out revokes it server-side. CSRF tokens stay in client memory and are required alongside the configured Origin on authenticated mutations. API responses use `Cache-Control: no-store`.
 
-New-account and sign-in routes share an IP rate limit of ten attempts per ten minutes. General requests are limited to 180 per minute. The app does not trust forwarded client addresses by default. `TRUST_PROXY=1` trusts exactly one proxy hop and must only be used behind a controlled proxy with the API port private.
+New-account and sign-in routes share an IP rate limit of ten attempts per ten minutes. General requests are limited to 180 per minute per valid signed-in user, falling back to IP for unauthenticated requests. Shared-office users do not share the general allowance. Authentication and code endpoints retain IP-based limits independently. The app does not trust forwarded client addresses by default. `TRUST_PROXY=1` trusts exactly one proxy hop and must only be used behind a controlled proxy with the API port private.
 
-Email verification is mandatory before account activation and fresh sign-in. Password recovery and changes revoke sessions and pending proofs; security notifications are durably queued. The upgrade revokes previous sessions and requires legacy users to verify email. See [authentication rules and delivery setup](AUTHENTICATION.md). Account administration and email-address changes remain later work. There are no preset shared passwords or production judge accounts.
+Email verification is mandatory before real-account activation and fresh sign-in. Password recovery and changes revoke sessions and pending proofs; security notifications are durably queued. The upgrade revokes previous sessions and requires legacy users to verify email. See [authentication rules and delivery setup](AUTHENTICATION.md). Account administration and email-address changes remain later work. Two explicitly seeded public judge accounts form a separate shared team; only these identities skip OTP, and cannot change credentials, invite members or revoke other visitors' sessions. See [judge access](JUDGING.md).
 
 ## Workflow rules
 
@@ -109,7 +113,7 @@ On a prepared Vultr VM, the intended deployment is:
 
 Without Docker, run `npm ci`, `npm run build`, then run `npm start` with `NODE_ENV=production`, `APP_ORIGIN`, a persistent `DATABASE_PATH` and the required bind/proxy settings in the service environment.
 
-A real local research-to-approval browser check passed on 4 November 2026; deployment verification is recorded separately in the runbook. Authentication email delivery uses Resend and the verified sender domain. Real authentication test emails were delivered and confirmed; no venue bookings or outing invitations were sent. See [provider setup and credit redemption](PROVIDER-SETUP.md) and [agent boundaries and verification](AGENT-REVIEW.md). The agent runs in the central API with fixed provider endpoints, bounded tool calls, three-minute execution limits and persisted per-user quotas. It never executes model-generated code or contacts venue URLs directly.
+A real local research-to-approval browser check passed on 4 November 2026; deployment verification is recorded separately in the runbook. Authentication email delivery uses Resend and the verified sender domain. Real authentication test emails were delivered and confirmed. The subsequent workflow release also verified real outing/review/cancellation/report mail; venue booking remains external. See [provider setup and credit redemption](PROVIDER-SETUP.md) and [agent boundaries and verification](AGENT-REVIEW.md). The agent runs in the central API with fixed provider endpoints, bounded tool calls, three-minute execution limits and persisted per-user quotas. It never executes model-generated code or contacts venue URLs directly.
 
 ## Sources checked
 

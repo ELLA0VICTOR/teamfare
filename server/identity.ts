@@ -46,6 +46,7 @@ const startFields = {
   email,
   password,
   confirmPassword: z.string().max(128),
+  outingEmails: z.boolean().optional(),
 };
 type Purpose = AuthChallenge["purpose"];
 type ChallengeRow = {
@@ -69,6 +70,7 @@ type Payload = {
   passwordHash?: string;
   version?: number;
   existing?: boolean;
+  outingEmails?: boolean;
 };
 const lifetime = 10 * 60 * 1000,
   cooldown = 60 * 1000;
@@ -367,13 +369,17 @@ export function registerIdentity(
       max: options.authLimit,
       timeWindow: "10 minutes",
       groupId: "account-access",
+      keyGenerator: (request: FastifyRequest) => request.ip,
     },
   };
   const codeRate = {
-    rateLimit: { max: 30, timeWindow: "10 minutes", groupId: "account-codes" },
+    rateLimit: { max: 30, timeWindow: "10 minutes", groupId: "account-codes", keyGenerator: (request: FastifyRequest) => request.ip },
   };
   app.get("/api/auth/config", () => ({
     ready: secret.length >= 32 && (!!options.mailer || mailSetup().ready),
+    judgeAccess: !!store.db
+      .prepare("SELECT user_id FROM judge_accounts LIMIT 1")
+      .get(),
   }));
   app.post(
     "/api/auth/register",
@@ -388,12 +394,18 @@ export function registerIdentity(
         })
         .parse(request.body);
       const user = store.userByEmail(input.email);
+      if (input.email.endsWith(".invalid"))
+        return fail(
+          400,
+          "Use a deliverable email address for a real account. Judge accounts are provisioned separately.",
+        );
       const passwordHash = await hashPassword(input.password);
       const challenge = await issue("signup", input.email, user, {
         name: input.name,
         teamName: input.teamName,
         passwordHash,
         existing: !!user,
+        outingEmails: input.outingEmails ?? false,
       });
       return reply.code(202).send(challenge);
     },
@@ -410,22 +422,24 @@ export function registerIdentity(
     const inviteHash = digest(input.inviteCode);
     const invite = store.db
       .prepare(
-        "SELECT id FROM invites WHERE token_hash=? AND used_by IS NULL AND expires>?",
+        "SELECT id FROM invites WHERE token_hash=? AND used_by IS NULL AND expires>? AND (recipient_email IS NULL OR recipient_email=?)",
       )
-      .get(inviteHash, Date.now());
+      .get(inviteHash, Date.now(), input.email);
     if (!invite)
       return fail(400, "This invitation is invalid, expired, or already used.");
     const user = store.userByEmail(input.email);
+    if (input.email.endsWith(".invalid"))
+      return fail(400, "Use a deliverable email address for a real account.");
     const challenge = await issue("signup", input.email, user, {
       name: input.name,
       inviteHash,
       passwordHash: await hashPassword(input.password),
       existing: !!user,
+      outingEmails: input.outingEmails ?? false,
     });
     return reply.code(202).send(challenge);
   });
   app.post("/api/auth/login", { config: authRate }, async (request, reply) => {
-    ready();
     const input = z
       .object({ email, password: z.string().min(1).max(128) })
       .strict()
@@ -444,6 +458,18 @@ export function registerIdentity(
       audit("login_rejected");
       return fail(401, "The email or password is incorrect.");
     }
+    if (store.isJudge(user)) {
+      if (!user.email_verified_at)
+        return fail(403, "Judge access is not ready.");
+      const previous = request.cookies[sessionCookie];
+      if (previous)
+        store.db
+          .prepare("DELETE FROM sessions WHERE hash=?")
+          .run(digest(previous));
+      audit("judge_login", user.id);
+      return options.session(user, reply);
+    }
+    ready();
     const challenge = await issue("login", input.email, user, {
       version: user.auth_version,
     });
@@ -459,7 +485,7 @@ export function registerIdentity(
       const challenge = await issue(
         "reset",
         input.email,
-        user,
+        user && !store.isJudge(user) ? user : undefined,
         { version: user?.auth_version },
         true,
       );
@@ -558,9 +584,9 @@ export function registerIdentity(
       if (payload.inviteHash) {
         const invite = store.db
           .prepare(
-            "SELECT id,team_id,role FROM invites WHERE token_hash=? AND used_by IS NULL AND expires>?",
+            "SELECT id,team_id,role FROM invites WHERE token_hash=? AND used_by IS NULL AND expires>? AND (recipient_email IS NULL OR recipient_email=?)",
           )
-          .get(payload.inviteHash, Date.now()) as
+          .get(payload.inviteHash, Date.now(), row.email) as
           | { id: string; team_id: string; role: "employee" | "manager" }
           | undefined;
         if (!invite)
@@ -578,7 +604,7 @@ export function registerIdentity(
       }
       store.db
         .prepare(
-          "INSERT INTO users(id,team_id,name,email,password_hash,role,email_verified_at) VALUES(?,?,?,?,?,?,?)",
+          "INSERT INTO users(id,team_id,name,email,password_hash,role,email_verified_at,outing_emails) VALUES(?,?,?,?,?,?,?,?)",
         )
         .run(
           userId,
@@ -588,6 +614,7 @@ export function registerIdentity(
           payload.passwordHash!,
           role,
           new Date().toISOString(),
+          payload.outingEmails ? 1 : 0,
         );
       if (payload.inviteHash)
         store.db
@@ -623,6 +650,9 @@ export function registerIdentity(
         .parse(request.body);
       const row = validCode(input.challengeId, input.code);
       if (row.purpose !== "reset" || !row.user_id) return fail(400, invalid);
+      const account = store.user(row.user_id);
+      if (account && store.isJudge(account))
+        return fail(403, "Shared judge credentials cannot be changed.");
       const payload = JSON.parse(row.payload) as Payload;
       const passwordHash = await hashPassword(input.password);
       store.transaction(() => {
@@ -648,6 +678,8 @@ export function registerIdentity(
     async (request, reply) => {
       ready();
       const { user } = options.authenticate(request, true);
+      if (store.isJudge(user))
+        return fail(403, "Shared judge credentials cannot be changed.");
       const input = z
         .object({
           currentPassword: z.string().min(1).max(128),
@@ -671,6 +703,8 @@ export function registerIdentity(
   );
   app.post("/api/auth/logout-all", async (request, reply) => {
     const { user } = options.authenticate(request, true);
+    if (store.isJudge(user))
+      return fail(403, "Use Sign out to end only your own judge session.");
     store.transaction(() => {
       store.db
         .prepare("UPDATE users SET auth_version=auth_version+1 WHERE id=?")

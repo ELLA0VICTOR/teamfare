@@ -14,6 +14,7 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/src/data.ts ./src/data.ts
 COPY --from=build --chown=node:node /app/src/research.ts ./src/research.ts
 COPY --from=build --chown=node:node /app/src/identity.ts ./src/identity.ts
+COPY --from=build --chown=node:node /app/src/workflows.ts ./src/workflows.ts
 COPY --from=build --chown=node:node /app/server ./server
 RUN mkdir -p /var/lib/teamfare && chown node:node /var/lib/teamfare && chmod 700 /var/lib/teamfare
 USER node

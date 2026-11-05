@@ -15,6 +15,8 @@ export type UserRow = {
   preference: string;
   email_verified_at: string | null;
   auth_version: number;
+  outing_emails: number;
+  interests: string;
 };
 export type PlanRow = {
   id: string;
@@ -114,17 +116,112 @@ export class Store {
         DELETE FROM sessions;
         INSERT INTO schema_migrations(version) VALUES(4);`);
       });
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS judge_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
+      );
+      INSERT OR IGNORE INTO schema_migrations(version) VALUES(5);
+    `);
+    if (
+      !this.db
+        .prepare("SELECT version FROM schema_migrations WHERE version=6")
+        .get()
+    )
+      this.transaction(() => {
+        const columns = this.db.prepare("PRAGMA table_info(users)").all();
+        if (!columns.some((c) => c.name === "outing_emails"))
+          this.db.exec(
+            "ALTER TABLE users ADD COLUMN outing_emails INTEGER NOT NULL DEFAULT 0",
+          );
+        if (!columns.some((c) => c.name === "interests"))
+          this.db.exec(
+            "ALTER TABLE users ADD COLUMN interests TEXT NOT NULL DEFAULT '[]'",
+          );
+        this.db.exec(`
+        CREATE TABLE IF NOT EXISTS workflow_emails (
+          id TEXT PRIMARY KEY, dedupe TEXT NOT NULL UNIQUE, team_id TEXT NOT NULL REFERENCES teams(id),
+          plan_id TEXT REFERENCES plans(id), recipient_id TEXT REFERENCES users(id), recipient_email TEXT NOT NULL,
+          kind TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, send_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL, lease_until INTEGER NOT NULL DEFAULT 0,
+          accepted_at INTEGER, error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS workflow_due ON workflow_emails(status,send_at);
+        CREATE TABLE IF NOT EXISTS availability_polls (
+          plan_id TEXT PRIMARY KEY REFERENCES plans(id), team_id TEXT NOT NULL REFERENCES teams(id),
+          version INTEGER NOT NULL, slots TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS availability_replies (
+          plan_id TEXT NOT NULL REFERENCES availability_polls(plan_id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES users(id), version INTEGER NOT NULL,
+          available TEXT NOT NULL, replied_at TEXT NOT NULL, PRIMARY KEY(plan_id,user_id)
+        );
+        CREATE TABLE IF NOT EXISTS receipts (
+          id TEXT PRIMARY KEY, expense_id TEXT NOT NULL UNIQUE REFERENCES expenses(id),
+          team_id TEXT NOT NULL REFERENCES teams(id), user_id TEXT NOT NULL REFERENCES users(id),
+          name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+          bytes BLOB NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS expense_requests (
+          user_id TEXT NOT NULL REFERENCES users(id), request_id TEXT NOT NULL,
+          expense_id TEXT NOT NULL REFERENCES expenses(id), payload_hash TEXT NOT NULL,
+          PRIMARY KEY(user_id,request_id)
+        );
+        INSERT OR IGNORE INTO schema_migrations(version) VALUES(6);
+      `);
+      });
+    if (
+      !this.db
+        .prepare("PRAGMA table_info(invites)")
+        .all()
+        .some((c) => c.name === "recipient_email")
+    )
+      this.db.exec("ALTER TABLE invites ADD COLUMN recipient_email TEXT");
+    this.db.exec(
+      "CREATE TABLE IF NOT EXISTS expense_requests(user_id TEXT NOT NULL REFERENCES users(id),request_id TEXT NOT NULL,expense_id TEXT NOT NULL REFERENCES expenses(id),payload_hash TEXT NOT NULL,PRIMARY KEY(user_id,request_id))",
+    );
+    if (
+      !this.db
+        .prepare("PRAGMA table_info(workflow_emails)")
+        .all()
+        .some((c) => c.name === "first_attempt_at")
+    )
+      this.db.exec(
+        "ALTER TABLE workflow_emails ADD COLUMN first_attempt_at INTEGER",
+      );
+    if (
+      !this.db
+        .prepare("PRAGMA table_info(workflow_emails)")
+        .all()
+        .some((c) => c.name === "request_hash")
+    )
+      this.db.exec("ALTER TABLE workflow_emails ADD COLUMN request_hash TEXT");
   }
   transaction<T>(work: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+    const nested = this.db.isTransaction;
+    const point = "tf_" + ++this.transactionNumber;
+    this.db.exec(nested ? "SAVEPOINT " + point : "BEGIN IMMEDIATE");
     try {
       const result = work();
-      this.db.exec("COMMIT");
+      this.db.exec(nested ? "RELEASE " + point : "COMMIT");
       return result;
     } catch (error) {
-      this.db.exec("ROLLBACK");
+      this.db.exec(nested ? "ROLLBACK TO " + point : "ROLLBACK");
+      if (nested) this.db.exec("RELEASE " + point);
       throw error;
     }
+  }
+  private transactionNumber = 0;
+  isJudge(user: UserRow) {
+    return (
+      user.team_id === "teamfare-public-judges-v1" &&
+      ["teamfare-judge-manager", "teamfare-judge-organiser"].includes(
+        user.id,
+      ) &&
+      !!this.db
+        .prepare("SELECT user_id FROM judge_accounts WHERE user_id=?")
+        .get(user.id)
+    );
   }
   user(id: string) {
     return this.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as
@@ -138,14 +235,18 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT id,name,role,department FROM users WHERE team_id = ? ORDER BY rowid",
+          "SELECT id,name,role,department,interests FROM users WHERE team_id = ? ORDER BY rowid",
         )
-        .all(teamId) as Pick<UserRow, "id" | "name" | "role" | "department">[]
+        .all(teamId) as Pick<
+        UserRow,
+        "id" | "name" | "role" | "department" | "interests"
+      >[]
     ).map((user) => ({
       id: user.id,
       name: user.name,
       role: user.role,
       team: user.department,
+      interests: JSON.parse(user.interests) as string[],
       initials: user.name
         .trim()
         .split(/\s+/)
@@ -175,9 +276,42 @@ export class Store {
       })),
       expenses: (
         this.db
-          .prepare("SELECT data FROM expenses WHERE team_id = ? ORDER BY rowid")
-          .all(user.team_id) as { data: string }[]
-      ).map((row) => JSON.parse(row.data) as Expense),
+          .prepare(
+            "SELECT data,created_by FROM expenses WHERE team_id = ? ORDER BY rowid",
+          )
+          .all(user.team_id) as { data: string; created_by: string }[]
+      ).map((row) => {
+        const expense = JSON.parse(row.data) as Expense & { payerId?: string };
+        expense.createdBy = row.created_by;
+        if (
+          user.role === "manager" ||
+          row.created_by === user.id ||
+          expense.payerId === user.id
+        ) {
+          const receipt = this.db
+            .prepare(
+              "SELECT id,name,mime,size,created_at FROM receipts WHERE expense_id=?",
+            )
+            .get(expense.id) as
+            | {
+                id: string;
+                name: string;
+                mime: string;
+                size: number;
+                created_at: string;
+              }
+            | undefined;
+          if (receipt)
+            expense.receipt = {
+              id: receipt.id,
+              name: receipt.name,
+              mime: receipt.mime,
+              size: receipt.size,
+              createdAt: receipt.created_at,
+            };
+        }
+        return expense;
+      }),
       saved: (
         this.db
           .prepare("SELECT experience_id FROM saved_ideas WHERE user_id = ?")

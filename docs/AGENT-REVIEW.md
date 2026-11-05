@@ -32,7 +32,7 @@ Research screenshots and isolated browser-test databases are ignored under `.art
 
 ## Not verified
 
-Real runs establish provider access and workflow integration; they do not establish the model's success rate across other briefs or confirm promo-credit accounting. See [provider setup](PROVIDER-SETUP.md). The successful runs included estimated prices and explicitly over-budget alternatives, while recommending an option within budget. All real availability, final prices, dietary suitability and booking terms still need direct venue confirmation. Venue bookings, outing invitations and payments are not integrated. Authentication email delivery is integrated and tested; see [authentication review](AUTHENTICATION.md).
+Real runs establish provider access and workflow integration; they do not establish the model's success rate across other briefs or confirm promo-credit accounting. See [provider setup](PROVIDER-SETUP.md). The successful runs included estimated prices and explicitly over-budget alternatives, while recommending an option within budget. All real availability, final prices, dietary suitability and booking terms still need direct venue confirmation. Venue bookings and payments remain external. The workflow release adds authenticated, opt-in outing invitations and reminders through a durable outbox; the model cannot send them. Authentication email delivery is integrated and tested; see [authentication review](AUTHENTICATION.md).
 
 ## Deployed verification
 

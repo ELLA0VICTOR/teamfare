@@ -35,6 +35,8 @@ The Teamfare mark is original SVG code. All four current experiences use locally
 
 ## Current boundary and next phase
 
+This section records the earlier frontend checkpoint. The current app has [verified accounts](AUTHENTICATION.md), [live research](AGENT-REVIEW.md), persistent shared workflows and a [Vultr deployment](DEPLOYMENT.md). The browser-local preview remains a separate optional mode. Current feature gaps are recorded in the [functionality audit](FUNCTIONALITY-AUDIT.md).
+
 This phase is a browser-local frontend. The composer uses local keyword selection to preselect an editable sample experience, not an AI service. Its fields prefill a saved draft; no research or availability claims are generated. Plans, RSVP choices, preferences, approvals, favourites, and expenses persist in localStorage. The manager switch is a preview control, not authentication. Nothing is booked, emailed, paid, or reimbursed.
 
 The next phase needs authenticated employee and manager access, server-enforced approvals, a durable database, verified venue research, and agent tools. Challenge 2 requires the web application and central backend on Vultr. Serverless Inference is optional; select it based on tested model and tool-call support. This frontend has not been deployed or submitted.

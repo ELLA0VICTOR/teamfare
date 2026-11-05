@@ -131,6 +131,20 @@ export class ResearchService {
         429,
         "You have reached four research runs this hour. Try again later.",
       );
+    const day = new Date().toISOString().slice(0, 10) + "T00:00:00.000Z";
+    const globalDaily = this.store.db
+      .prepare("SELECT count(*) AS n FROM research_runs WHERE created_at>=?")
+      .get(day) as { n: number };
+    const teamDaily = this.store.db
+      .prepare(
+        "SELECT count(*) AS n FROM research_runs WHERE team_id=? AND created_at>=?",
+      )
+      .get(user.team_id, day) as { n: number };
+    if (globalDaily.n >= 20 || teamDaily.n >= 10)
+      throw new ResearchError(
+        429,
+        "The daily research allowance has been reached. Try again tomorrow (UTC).",
+      );
     const { requestId: _requestId, ...fields } = parsed;
     const input: ResearchInput = { ...fields, preference: user.preference };
     const run: ResearchRun = {
@@ -248,6 +262,8 @@ export class ResearchService {
         declined: [],
         status: "Draft",
         revision: 1,
+        emailGuests: true,
+        durationMinutes: 120,
         unitPrice: costTotal(option.costs, run.input.people) / run.input.people,
         proposal: { ...option, runId: run.id },
         events: [

@@ -19,6 +19,10 @@ import { ExpenseLedger, SpendBar } from "./components/ExpenseLedger";
 import { Modal } from "./components/Modal";
 import { ResearchPanel } from "./components/ResearchPanel";
 import { AccountSecurity } from "./components/AccountSecurity";
+import { WorkflowPreferences } from "./components/WorkflowPreferences";
+import { ReportEmail } from "./components/ReportEmail";
+import { InviteEmail } from "./components/InviteEmail";
+import { expenseCsv, filteredExpenses } from "./workflows";
 import type { ResearchRequest } from "./components/ResearchPanel";
 import { PlanSheet } from "./components/PlanSheet";
 import { RouteLine } from "./components/RouteLine";
@@ -43,7 +47,7 @@ import {
 } from "./plan";
 import type { Role } from "./plan";
 import "./App.css";
-import { api, ApiError } from "./api";
+import { api, ApiError, uploadReceipt } from "./api";
 import { TeamContext } from "./team-context";
 import type { Connection } from "./team-context";
 import type { Member } from "./team-context";
@@ -52,7 +56,16 @@ type Dialog =
   | { type: "experience"; experience: Experience }
   | { type: "expense"; planId?: string }
   | { type: "cancel"; id: string }
-  | { type: "about" | "reset" | "people" | "invite" | "security" }
+  | {
+      type:
+        | "about"
+        | "reset"
+        | "people"
+        | "invite"
+        | "security"
+        | "workflow-preferences"
+        | "report-email";
+    }
   | null;
 const navigation = [
   { view: "discover", label: "Home", icon: HomeIcon },
@@ -92,6 +105,7 @@ export default function App({
   const [saving, setSaving] = useState(false),
     [syncError, setSyncError] = useState(false);
   const [invitation, setInvitation] = useState<{
+    id: string;
     code: string;
     expiresAt: string;
   } | null>(null);
@@ -108,6 +122,12 @@ export default function App({
     window.location.hash === "#plans?needs-you" ? "Needs you" : "auto",
   );
   const [expenseFilter, setExpenseFilter] = useState("all");
+  const [expenseFrom, setExpenseFrom] = useState("");
+  const [expenseTo, setExpenseTo] = useState("");
+  const expenseDateError =
+    expenseFrom && expenseTo && expenseFrom > expenseTo
+      ? "The end date must be on or after the start date."
+      : "";
   const profile = useRef<HTMLDivElement>(null);
   const main = useRef<HTMLElement>(null);
   const pending = demo.plans.filter((plan) =>
@@ -136,9 +156,14 @@ export default function App({
             (plan.status === "Approved" &&
               (plan.date < localDate() || !!plan.settledAt))),
   );
-  const visibleExpenses = demo.expenses.filter(
-    (expense) => expenseFilter === "all" || expense.planId === expenseFilter,
-  );
+  const reportFilter = {
+    ...(expenseFilter !== "all" ? { planId: expenseFilter } : {}),
+    ...(expenseFrom ? { from: expenseFrom } : {}),
+    ...(expenseTo ? { to: expenseTo } : {}),
+  };
+  const visibleExpenses = expenseDateError
+    ? []
+    : filteredExpenses(demo.expenses, reportFilter);
   const activePlans = demo.plans.filter((plan) => plan.status !== "Cancelled");
   const budget = activePlans.reduce((sum, plan) => sum + plan.budget, 0);
   const spent = demo.expenses
@@ -277,6 +302,8 @@ export default function App({
           location: placeFor(plan),
           note: plan.note,
           attendees: plan.attendees,
+          durationMinutes: plan.durationMinutes ?? 120,
+          emailGuests: plan.emailGuests ?? false,
           revision: plan.revision,
           submit: plan.status === "Awaiting approval",
           ...(plan.proposal
@@ -408,6 +435,8 @@ export default function App({
             .filter((member) => member.id !== viewerId)
             .map((member) => member.id),
         ].slice(0, values.people),
+        emailGuests: true,
+        durationMinutes: 120,
       });
       if (created) {
         setDialog(null);
@@ -464,12 +493,27 @@ export default function App({
       `RSVP updated. ${next.going.length} of ${next.people} people going.`,
     );
   }
-  async function addExpense(expense: Expense) {
+  async function addExpense(expense: Expense, receipt?: File) {
     if (live) {
       const { id: _id, ...fields } = expense;
-      if (await mutate("/expenses", fields)) {
+      const created = await mutate<Expense>("/expenses", {
+        ...fields,
+        requestId: expense.id,
+      });
+      if (created) {
         setDialog(null);
-        setToast("Expense recorded. No payment was made.");
+        if (receipt) {
+          try {
+            await uploadReceipt(created.id, receipt, connection!.csrfToken);
+            await refresh();
+            setToast("Expense and receipt recorded. No payment was made.");
+          } catch (error) {
+            setToast(
+              "Expense recorded; receipt upload failed. Attach it from the expense record. " +
+                (error instanceof Error ? error.message : ""),
+            );
+          }
+        } else setToast("Expense recorded. No payment was made.");
       }
       return;
     }
@@ -498,26 +542,10 @@ export default function App({
       setToast("There are no expenses to export.");
       return;
     }
-    const cell = (value: string | number) =>
-      `"${String(value)
-        .replace(/^[=+@-]/, "'$&")
-        .replaceAll('"', '""')}"`;
-    const rows = [
-      ["Date", "Outing", "Description", "Category", "Paid by", "Amount (NGN)"],
-      ...visibleExpenses.map((expense) => [
-        expense.date,
-        demo.plans.find((plan) => plan.id === expense.planId)?.title ?? "",
-        expense.description,
-        expense.category,
-        expense.payer,
-        expense.amount,
-      ]),
-    ];
     const url = URL.createObjectURL(
-      new Blob(
-        ["\uFEFF" + rows.map((row) => row.map(cell).join(",")).join("\r\n")],
-        { type: "text/csv;charset=utf-8" },
-      ),
+      new Blob([expenseCsv(visibleExpenses, demo.plans)], {
+        type: "text/csv;charset=utf-8",
+      }),
     );
     const link = document.createElement("a");
     link.href = url;
@@ -629,7 +657,7 @@ export default function App({
                       >
                         Refresh team data
                       </button>
-                      {role === "manager" && (
+                      {role === "manager" && !connection?.user.judge && (
                         <button
                           onClick={() => {
                             setInvitation(null);
@@ -640,13 +668,23 @@ export default function App({
                           Invite teammate
                         </button>
                       )}
+                      {!connection?.user.judge && (
+                        <button
+                          onClick={() => {
+                            setDialog({ type: "security" });
+                            setProfileOpen(false);
+                          }}
+                        >
+                          Account security
+                        </button>
+                      )}
                       <button
                         onClick={() => {
-                          setDialog({ type: "security" });
+                          setDialog({ type: "workflow-preferences" });
                           setProfileOpen(false);
                         }}
                       >
-                        Account security
+                        Outing preferences
                       </button>
                       <button onClick={() => void signOut()}>Sign out</button>
                       <p>{connection?.user.email}</p>
@@ -677,6 +715,13 @@ export default function App({
           {saving && (
             <p className="save-status" role="status">
               Saving to your team…
+            </p>
+          )}
+          {connection?.user.judge && (
+            <p className="field-help judge-notice" role="note">
+              Shared judge team · Use sample information only. Changes are
+              visible to other judges. Real research uses Vultr and Tavily;
+              sample plans are labelled.
             </p>
           )}
           {syncError && (
@@ -753,6 +798,8 @@ export default function App({
                     setDialog({ type: "cancel", id: selectedPlan.id })
                   }
                   announce={setToast}
+                  csrf={connection?.csrfToken}
+                  onChanged={refresh}
                 />
               ) : (
                 <div className="empty-state">
@@ -886,7 +933,7 @@ export default function App({
                 )}
                 <p className="field-help page-footnote">
                   {live
-                    ? "Plans and decisions are saved to your team. Bookings and invitations are not sent."
+                    ? "Plans and decisions are saved to your team. Approved outings can queue invitations and reminders; check email status. No venue is booked."
                     : "Plans and decisions are saved in this browser. Bookings and invitations are not sent."}
                 </p>
               </section>
@@ -903,10 +950,20 @@ export default function App({
                   <button
                     className="button button-outline"
                     onClick={exportExpenses}
+                    disabled={!!expenseDateError}
                   >
                     <ArrowDownToLine size={17} />
                     Export CSV
                   </button>
+                  {live && role === "manager" && !connection?.user.judge && (
+                    <button
+                      className="button button-outline"
+                      disabled={!!expenseDateError || !visibleExpenses.length}
+                      onClick={() => setDialog({ type: "report-email" })}
+                    >
+                      Email report
+                    </button>
+                  )}
                   <button
                     className="button button-dark"
                     onClick={() => setDialog({ type: "expense" })}
@@ -926,7 +983,7 @@ export default function App({
                   Across {activePlans.length} active{" "}
                   {activePlans.length === 1 ? "outing" : "outings"}. Cancelled
                   outings are excluded from this overview; their records remain
-                  below.
+                  below. Filters apply to the report and export below.
                 </span>
               </div>
               <div className="expense-tools">
@@ -953,15 +1010,71 @@ export default function App({
                     />
                   </span>
                 </label>
+                <label className="field">
+                  From date
+                  <input
+                    type="date"
+                    value={expenseFrom}
+                    onChange={(e) => setExpenseFrom(e.target.value)}
+                    aria-invalid={!!expenseDateError}
+                    aria-describedby={
+                      expenseDateError ? "expense-date-error" : undefined
+                    }
+                  />
+                </label>
+                <label className="field">
+                  To date
+                  <input
+                    type="date"
+                    value={expenseTo}
+                    onChange={(e) => setExpenseTo(e.target.value)}
+                    aria-invalid={!!expenseDateError}
+                    aria-describedby={
+                      expenseDateError ? "expense-date-error" : undefined
+                    }
+                  />
+                </label>
+                {expenseDateError && (
+                  <p
+                    id="expense-date-error"
+                    className="form-error expense-report-line"
+                    role="alert"
+                  >
+                    {expenseDateError}
+                  </p>
+                )}
                 <p className="field-help">
-                  Amounts in NGN · export follows your filter.
+                  {visibleExpenses.length}{" "}
+                  {visibleExpenses.length === 1 ? "expense" : "expenses"} ·{" "}
+                  {money(
+                    visibleExpenses.reduce(
+                      (sum, expense) => sum + expense.amount,
+                      0,
+                    ),
+                  )}{" "}
+                  recorded total in this report. Dates include both endpoints;
+                  CSV follows these filters.
                 </p>
+                {(expenseFrom || expenseTo || expenseFilter !== "all") && (
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setExpenseFrom("");
+                      setExpenseTo("");
+                      setExpenseFilter("all");
+                    }}
+                  >
+                    Clear expense filters
+                  </button>
+                )}
               </div>
               {demo.plans
                 .filter(
                   (plan) =>
                     (expenseFilter === "all" || plan.id === expenseFilter) &&
-                    demo.expenses.some((expense) => expense.planId === plan.id),
+                    visibleExpenses.some(
+                      (expense) => expense.planId === plan.id,
+                    ),
                 )
                 .map((plan) => {
                   const records = visibleExpenses.filter(
@@ -1004,15 +1117,28 @@ export default function App({
                           <SpendBar spent={recorded} budget={plan.budget} />
                         </div>
                       </header>
-                      <ExpenseLedger expenses={records} />
+                      <ExpenseLedger
+                        expenses={records}
+                        locked={!!plan.settledAt || plan.status === "Cancelled"}
+                        csrf={connection?.csrfToken}
+                        onChanged={refresh}
+                      />
                     </section>
                   );
                 })}
               {!visibleExpenses.length && (
                 <div className="empty-state">
                   <ReceiptText size={40} strokeWidth={1} />
-                  <h2>Start a clear record.</h2>
-                  <p>Record an expense against an approved outing.</p>
+                  <h2>
+                    {expenseFrom || expenseTo || expenseFilter !== "all"
+                      ? "No matching expenses."
+                      : "Start a clear record."}
+                  </h2>
+                  <p>
+                    {expenseFrom || expenseTo || expenseFilter !== "all"
+                      ? "Adjust the outing or date range to see more records."
+                      : "Record an expense against an approved outing."}
+                  </p>
                   <button
                     className="text-button"
                     onClick={() => setDialog({ type: "expense" })}
@@ -1068,6 +1194,19 @@ export default function App({
             />
           </Modal>
         )}
+        {dialog?.type === "workflow-preferences" && connection && (
+          <Modal title="Outing preferences" onClose={() => setDialog(null)}>
+            <WorkflowPreferences
+              csrf={connection.csrfToken}
+              onChanged={refresh}
+            />
+          </Modal>
+        )}
+        {dialog?.type === "report-email" && connection && (
+          <Modal title="Email expense report" onClose={() => setDialog(null)}>
+            <ReportEmail filter={reportFilter} csrf={connection.csrfToken} />
+          </Modal>
+        )}
         {dialog?.type === "invite" && live && role === "manager" && (
           <Modal title="Invite teammate" onClose={() => setDialog(null)}>
             <h2>A place at the table.</h2>
@@ -1094,6 +1233,7 @@ export default function App({
                   disabled={saving}
                   onClick={async () => {
                     const result = await mutate<{
+                      id: string;
                       code: string;
                       expiresAt: string;
                     }>("/invites", { role: inviteRole });
@@ -1132,6 +1272,12 @@ export default function App({
                 >
                   Copy code
                 </button>
+                {connection && (
+                  <InviteEmail
+                    invite={invitation}
+                    csrf={connection.csrfToken}
+                  />
+                )}
               </>
             )}
           </Modal>
@@ -1252,7 +1398,7 @@ export default function App({
             </p>
             <p>
               {live
-                ? "AI research, verified venue availability, booking, email invitations and payments are not connected yet."
+                ? "Live research, availability replies, calendar files, coordination emails, private receipts and expense reports run through the team backend. Venue availability still needs direct confirmation. No booking, card charge or reimbursement is made."
                 : "AI research, authentication, venue bookings, invitations, payments and cloud services are not connected. The manager switch is for exploring the local workflow."}
             </p>
             <button

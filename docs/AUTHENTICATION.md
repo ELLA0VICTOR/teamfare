@@ -47,6 +47,12 @@ For a temporary owner-only test, `Teamfare <onboarding@resend.dev>` can send onl
 
 ## Migration and verification
 
+### Public judge exception
+
+The two credentials in the README are intentionally public accounts provisioned only by `server/seed-judges.ts`. Schema version 5 adds an explicit `judge_accounts` marker table without changing or revoking existing real accounts/sessions. The password is still scrypt-verified, but these canonical account IDs in the canonical public judge team receive a session without an email code. User input cannot set judge status. Ordinary accounts keep the verification and recovery rules above.
+
+Judge accounts cannot generate member invitations, change/reset shared passwords or use sign-out-everywhere. Forgot-password retains its generic response but creates no account-linked proof or email for these identities. Their sessions still require Origin/CSRF checks on writes and are scoped to the separate team. Public research retains the existing shared quotas. The UI labels the shared team and hides administrative actions; server checks enforce the restriction independently. See [judge access and provisioning](JUDGING.md).
+
 SQLite schema versions 3 and 4 add verified-email state, authentication versioning, code challenges, persistent limits, audit events, notification outbox and session inactivity tracking. Existing teams/plans/expenses and password hashes remain. Previous sessions are revoked during upgrade, and existing users must verify their email on the next login or recover through email. Database files remain private and ignored; back up using the existing SQLite-consistent procedure before deployment.
 
 Tests cover pending account access, password confirmation, ownership proof, replay, guessing, expiry, resend invalidation, duplicate signup, recovery, password changes, CSRF, stale login proofs, session revocation, email failures and migration. Browser checks cover OTP login and reload, password change, recovery and global sign-out in addition to the existing manager/employee journey. Automated delivery uses clearly isolated mail fixtures; real delivery requires a valid key, verified domain and an actual inbox check.
@@ -56,6 +62,10 @@ On 4 November 2026, the corrected local Resend key successfully listed `dixmail.
 The production build, lint, 18 API checks, 12 preview browser journeys, two account browser journeys and the research browser journey were run during this work. The account journey found a field-label issue, which was fixed; the test inbox helper also needed to wait for the asynchronous reset message rather than read a previous code. Real mail delivery was checked separately as described above. These checks establish the exercised behaviour, not an absence of all bugs or vulnerabilities.
 
 Deployment verification subsequently passed 21 API checks and actual signup/invitation proofs and fresh sign-in codes through Resend on the public HTTPS app. Cookies were Secure and HttpOnly; sessions and shared team data survived a deployed-container restart. The original local account/password was retained, while copied old sessions were cleared. Temporary verification accounts were deleted after checking the workflow. See [deployment results and DNS limitations](DEPLOYMENT.md).
+
+## Coordination additions
+
+Schema version 6 preserves existing accounts and sessions while adding explicit outing-email consent (off for existing accounts), activity interests and addressed invitation email. Verification/recovery mail remains mandatory. An emailed team invitation is bound to its intended address and consumed only after that address proves ownership. General API requests have separate per-user budgets behind shared office IPs; authentication/code routes retain IP limits. Coordination/report payloads are encrypted in a separate durable outbox. See [workflow rules](WORKFLOWS.md) and current deployed verification in [the runbook](DEPLOYMENT.md).
 
 ## References
 

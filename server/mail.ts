@@ -5,9 +5,21 @@ export type MailMessage = {
   subject: string;
   text: string;
   id: string;
+  attachments?: { filename: string; content: string }[];
 };
 export type AuthMailer = { send(message: MailMessage): Promise<void> };
 export class MailError extends Error {}
+let nextTransport = Promise.resolve();
+let lastTransportAt = 0;
+async function transportSlot() {
+  const slot = nextTransport.then(async () => {
+    const delay = 600 - (Date.now() - lastTransportAt);
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    lastTransportAt = Date.now();
+  });
+  nextTransport = slot.catch(() => {});
+  await slot;
+}
 export function mailSetup() {
   const missing = ["RESEND_API_KEY", "EMAIL_FROM", "AUTH_SECRET"].filter(
     (name) => !process.env[name]?.trim(),
@@ -28,6 +40,7 @@ export function resendMailer(): AuthMailer {
         );
       let response: Response;
       try {
+        await transportSlot();
         response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           redirect: "error",
@@ -42,6 +55,9 @@ export function resendMailer(): AuthMailer {
             to: [message.to],
             subject: message.subject,
             text: message.text,
+            ...(message.attachments?.length
+              ? { attachments: message.attachments }
+              : {}),
           }),
         });
       } catch {

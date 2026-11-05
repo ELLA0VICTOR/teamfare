@@ -235,7 +235,7 @@ export function Home({
           </form>
           <p className="field-help composer-note">
             {onResearch
-              ? "Research uses public web sources. You review the draft; nothing is booked or emailed."
+              ? "Research uses public web sources. You review the draft. Invitations wait for approval and recipient preferences; nothing is booked."
               : "Start with a sample experience. AI research, booking and invitations aren’t connected yet."}
           </p>
         </div>

@@ -2,6 +2,8 @@
 
 Live: [https://teamfare.dixmail.xyz](https://teamfare.dixmail.xyz), deployed 4 November 2026. The web app, Node API and SQLite data run on one dedicated Vultr Ubuntu 24.04 VM in London: 1 vCPU, 2 GB RAM, `vc2-1c-2gb`, quoted by the API at $10/month before any credits or additional usage. Vultr Inference, Tavily and Resend remain external services called only by the API.
 
+Latest status, 5 November: the full workflow release below is live, with automatic encrypted offsite storage ($6/month) and independent uptime checks active. VM plus storage totals $16/month before usage. Earlier dated verification sections are historical records; see **Full workflow and resilience release** for current results and recovery instructions.
+
 ## Access and initial provisioning
 
 1. Enable general Vultr API access and allow this workstation's current public IP. Put the management secret in local `.env` as `VULTR_API_KEY`; it is separate from the Inference key. It is never copied into the runtime environment or release archive.
@@ -59,13 +61,75 @@ Completed on Vultr on 4 November 2026:
 - Session, RSVP and expense persistence across a real deployed-container restart, followed by fresh password-plus-email-code sign-in. Desktop and 390px research/plan screenshots were reviewed; no horizontal overflow or browser page errors were observed.
 - Temporary verification teams were removed by exact ID/name/member checks, leaving the original account intact. The backup service completed successfully and the daily timer is active. A post-cleanup snapshot was downloaded off the VM and restored into an isolated writable SQLite copy; integrity, foreign keys and equality of the original account/password hash passed.
 
-Release: `r20261104T180842Z-e59e3bdb`. Archive SHA-256: `e59e3bdb4446e7a8d4b8dd53a78ee6191a61ed8d141f1327302db5ce48221830`. Ignored local evidence: `.artifacts/deploy/public-check/report.json`, screenshots alongside it, and `.artifacts/deploy/offsite/report.json`. The private downloaded backup is under that offsite directory. Off-VM copying has been verified manually; automatic offsite replication is not configured.
+Initial verified release: `r20261104T180842Z-e59e3bdb`. Archive SHA-256: `e59e3bdb4446e7a8d4b8dd53a78ee6191a61ed8d141f1327302db5ce48221830`. Ignored local evidence: `.artifacts/deploy/public-check/report.json`, screenshots alongside it, and `.artifacts/deploy/offsite/report.json`. The private downloaded backup is under that offsite directory. Off-VM copying has been verified manually; automatic offsite replication is not configured.
 
 DNS test limitation: automated Chrome on this workstation continued returning `ERR_NAME_NOT_RESOLVED` after the two public resolvers had the correct address. Native Windows Node resolved the domain and returned HTTPS 200 during checks, but later also returned a lookup failure. The browser journey used a temporary, process-local domain-to-VM mapping with TLS verification still enabled. No permanent hosts, DNS or certificate settings were changed. The user separately confirmed that the public URL opens the sign-in page in their normal browser. This does not establish propagation for every resolver. A public-IP probe confirmed that the private API port is unreachable externally.
 
 Final local regression results: production build and lint passed, all 21 API checks passed, all 12 preview browser journeys passed, both account browser journeys passed, and the fixture-backed research browser journey passed. These fixtures remain separate from the real deployed-provider check described above.
 
 The live agent check initially found an exhausted tool budget and an output truncation, which were corrected with a bounded submission/correction phase and a 1,024-token reasoning budget within 8,192 completion tokens. A subsequent provider timeout was reported as a failure; an explicit retry completed in about 20 seconds with two searches, one three-page extraction, price-validation feedback and three accepted options. Tests were resumed from the existing accounts/result after test-selector and refresh-timing corrections, without rerunning successful paid research. Successful integration does not guarantee provider availability or model reliability on every brief.
+
+## Judge access and reporting release — 5 November 2026
+
+Current release: `r20261105T064335Z-72f687b2`. Source archive SHA-256: `72f687b25232b4b09fd20d61b196694002e667c8556bc971495032c144870e4e`. The operator's changed public IP was added to API Access Control; the managed SSH rule was rotated to the new single-IP /32 after connection verification. Public web rules were preserved. Activation backed up the existing database before replacing the app container.
+
+Schema version 5 adds an explicit judge-account marker table without revoking normal sessions. The operator ran `server/seed-judges.ts` in the running container twice to verify idempotence. The provisioner created two public accounts in a separate team, three labelled sample plans and two sample expenses; real-account ID, email, password hash, role and team fingerprints were unchanged. See [judge provisioning and the walkthrough](JUDGING.md). Judge credentials and restrictions are documented at the top of the README. The seed is not automatically run on app startup.
+
+Local validation passed: production build, lint, all 22 API checks, 12 preview browser journeys, three account/judge browser journeys and one fixture-backed research journey. New coverage includes ordinary OTP preservation, judge isolation and administrative restrictions, seed idempotence, inclusive date filtering, CSV contents and invalid ranges. Expense screenshots were reviewed at desktop and 390px; overflow was also checked at 1024 and 768px.
+
+The deployed check used ordinary Chrome DNS and normal certificate verification, with **no DNS mapping or TLS bypass**. It passed both public credentials, Secure/HttpOnly cookies, unauthenticated API denial, blocked judge invitations/global revocation, a fresh draft/change-request/resubmission/approval/RSVP journey, expense recording, inclusive outing/date-filtered CSV, formula escaping, invalid-range feedback and 390px layout checks. No browser page errors occurred. Provider readiness was confirmed; this pass did not repeat metered research because the agent implementation was unchanged. The earlier real-provider evidence remains separate.
+
+The temporary verification plan and its expense were removed by exact identity checks; the public sample team remains available. A post-update online backup passed integrity checks. The post-cleanup snapshot was downloaded privately off the VM and restored into an isolated writable copy: integrity, foreign keys and both judge markers passed. Ignored evidence: `.artifacts/deploy/judge-live/report.json` and `.artifacts/deploy/offsite/judge-report.json`. README screenshots under `docs/images/` were captured from the deployed public judge team and are intentionally tracked.
+
+## Full workflow and resilience release — 5 November 2026
+
+Current release: `r20261105T080803Z-98d73b87`. Source archive SHA-256: `98d73b8766e883081beab29083b8024e0a32171ed1212f228cf6d85a284b5ac1`. An online snapshot preceded activation. Schema version 6 adds optional preferences, coordination/availability state, private receipts and the encrypted email outbox while preserving accounts, credentials and sessions. Existing accounts start with optional outing email off. The app remains nonroot with a read-only filesystem, database mode 600, data directory mode 700, no management API key in its environment, no local secret/test files in the image and a loopback-only API port.
+
+The deployed normal-account check passed with four Gmail aliases controlled by the operator. It exercised actual emailed ownership proofs, an addressed team invitation, saved interests, availability messages/four replies/time selection, review/change/resubmission/approval messages, four outing invitations, 90-minute ICS export, RSVP, private receipt bytes and another teammate's access denial, expense/report idempotence, mismatched report-filter rejection, filtered CSV export/report email and 390px overflow. A real container restart preserved sessions, receipts, RSVP and eight scheduled reminders. Cancelling the plan stopped all eight and queued four cancellation calendars. Resend reported the actual test messages delivered; the app intentionally shows only provider acceptance. No claim of inbox placement or reading is made.
+
+One browser assertion initially failed because the operator's test script had created accounts through an API while leaving an already-loaded sign-in page mounted. The script was corrected to reload after API setup and resumed the existing accounts; this was not bypassed by changing the app or creating replacement accounts. The completed test had no browser page errors or DNS/TLS overrides. Ignored evidence: `.artifacts/deploy/full-workflow/report.json`.
+
+Small-team measurement: four real verified users, sixteen concurrent requests, 160 reads, zero failures; median 176 ms, p95 527 ms, 2.532 seconds total. This is one small read-workload check, not a stress test or a capacity guarantee. A regression test separately verifies that authenticated users behind the same IP have independent general request budgets. Authentication/code routes retain IP-based protection.
+
+Final local checks passed: build, lint, **31 API checks**, 12 preview browser journeys, four account/workflow browser journeys and one fixture-backed research journey. The reminder test advances an isolated worker clock, verifies no early delivery, restarts the worker and verifies one send per deadline while skipping a declined guest. Production time was not changed. Earlier actual Vultr/Tavily research evidence remains valid; this pass added persistent daily quotas without rerunning paid research.
+
+The exact temporary team, four users, plan, receipt and expense were removed after testing. Original account ID/email/password/role/team/auth-version fingerprints matched the pre-release backup; both public judge accounts remain. A post-cleanup encrypted backup and independent restore passed as described below. No demo/video preparation was performed.
+
+The final private-file scan examined 129 Git-eligible source files and 25 frontend build files against actual local/runtime/provider/storage secrets, with no matches. Environment files, private storage configuration and restored databases are ignored. `git diff --check` passed; the staging area is empty. Public judge passwords are deliberate sample credentials, not provider secrets.
+
+### Private automatic offsite backups
+
+Approved storage is the dedicated **$6/month Archive tier in Amsterdam**, in addition to the $10/month VM. The private bucket is `teamfare-backups-164f787e` at `ams1.vultrobjects.com`. The host needs `python3-boto3`, installed through Ubuntu's package manager. Storage credentials and a separate random 256-bit encryption key live in root-only `/opt/teamfare/shared/backup-config.json`; they are not app environment variables or build inputs. A protected copy of this configuration and the production runtime environment is retained off the VM in ignored local deployment artifacts. Never commit either.
+
+`teamfare-backup.timer` runs daily at 03:00 UTC plus up to five minutes of jitter. `deploy/backup.sh` holds an exclusive lock, creates a SQLite-consistent snapshot, runs the private offsite program and retains seven days locally. `deploy/offsite.py` verifies private ACLs, encrypts with AES-256-GCM using native Node crypto before upload, verifies unauthenticated object access is denied, downloads it, checks the ciphertext hash, decrypts it and checks SQLite integrity/foreign keys. The dedicated `teamfare/` prefix transitions to Vultr Archive after seven days and expires after thirty days. Archive retrieval may require provider processing; the newest seven days remain hot.
+
+Inspect without exposing credentials:
+
+```sh
+systemctl status teamfare-backup.timer teamfare-backup.service
+journalctl -u teamfare-backup.service --since today
+cat /opt/teamfare/backups/offsite-status.json
+```
+
+The status file records last attempt, last success and a sanitised error category. A failed offsite replication makes the service fail while retaining the local snapshot; investigate before relying on the next backup. Local snapshots alone do not protect against VM loss. Do not rotate the backup encryption key without retaining the old key for existing objects; likewise preserve AUTH_SECRET for encrypted outbox payloads.
+
+Actual private uploads were downloaded and restored on the VM, then two encrypted objects were retrieved and restored independently on this Windows PC using the off-VM recovery key and Node 24. The pre-cleanup snapshot's PDF receipt matched its stored byte length and SHA-256. The post-cleanup snapshot passed integrity, foreign keys, an isolated writable transaction, both judge markers and original-account fingerprints. Ignored evidence: `.artifacts/deploy/offsite/portable-restore-report.json`.
+
+### Recovery
+
+1. Keep the private backup configuration, stable production environment/AUTH_SECRET and a source release somewhere protected outside the VM. Losing the encryption key makes these encrypted objects unrecoverable. Credentials stay outside Git and the public repository.
+2. Download a chosen encrypted object through an authenticated Vultr storage session. For an archived object, request retrieval and wait for it to be available. Restore to an isolated directory first; never overwrite a running database.
+3. With Node 24 and the release source, call `archiveFile('decrypt', encryptedPath, newSqlitePath, config.encryption_key)` exported by `server/archive.ts`. Read the key from the protected JSON file inside a local script. The CLI also accepts a JSON request on stdin; never put keys in command arguments, logs or chat. The decryptor authenticates ciphertext and refuses replacing an existing destination.
+4. Run `PRAGMA integrity_check` and `PRAGMA foreign_key_check` against the isolated restored file. Check expected account/team counts and receipt hashes before using it.
+5. On a replacement prepared host, stop the app, restore into the private persistent data volume as UID 1000 with directory 700/file 600, preserve production secrets and restart the same or a forward-compatible release. Review pending workflow mail before resuming workers; resending old snapshots outside Resend's idempotency window must not be forced. Confirm HTTPS, sign-in and permissions. Retain the previous database until recovery is verified.
+
+### Independent uptime checks and billing
+
+Only `.github/workflows/uptime.yml` was committed/pushed, in `e02e415`, under the user's explicit approval. It runs on standard public-repository GitHub runners with no repository secrets or paid runner configuration. It checks public HTTPS plus database-read readiness every ten minutes, with three attempts; GitHub can delay schedules. Failures appear in Actions, and notification delivery follows the owner's [GitHub notification settings](https://github.com/settings/notifications). No production outage was deliberately created and no failure email receipt is claimed.
+
+The post-deployment independent check [passed on GitHub](https://github.com/ELLA0VICTOR/teamfare/actions/runs/41994025181); the [workflow and history](https://github.com/ELLA0VICTOR/teamfare/actions/workflows/uptime.yml) are public. Other product/documentation changes remain local and deployed; this approval did not publish the entire working tree.
+
+At 08:24 UTC on 5 November, Vultr reported a $200 credit balance and $0.24 pending usage, approximately $199.76 effective credit. The approved VM plus storage quote is **$16/month before inference and other usage**. Eligible charges use available promotional credit subject to the promotion's terms. This is not indefinitely free hosting: promotional credit expires and paid resources continue to exist. Remove resources or arrange funding before credit ends; no card, deposit, larger tier or paid GitHub runner was added. The account API did not establish the exact promotion expiry date. See [Vultr's credit terms glossary](https://docs.vultr.com/platform/glossary).
 
 ## References
 

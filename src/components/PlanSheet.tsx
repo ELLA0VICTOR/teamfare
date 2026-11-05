@@ -30,6 +30,9 @@ import { RouteLine } from "./RouteLine";
 import { ExpenseLedger } from "./ExpenseLedger";
 import { Evidence } from "./Evidence";
 import type { CostLine, ItineraryItem } from "../research";
+import { AvailabilityPanel } from "./AvailabilityPanel";
+import { DeliveryStatus } from "./DeliveryStatus";
+import { InvitationActions } from "./InvitationActions";
 
 export function PlanSheet({
   plan,
@@ -40,6 +43,8 @@ export function PlanSheet({
   onExpense,
   onCancel,
   announce,
+  csrf,
+  onChanged,
 }: {
   plan: Plan;
   expenses: Expense[];
@@ -49,6 +54,8 @@ export function PlanSheet({
   onExpense: () => void;
   onCancel: () => void;
   announce: (text: string) => void;
+  csrf?: string;
+  onChanged?: () => Promise<void>;
 }) {
   const { live, viewerId, viewerName, managerName, members } = useTeam();
   const actor = live ? viewerName : role === "manager" ? "Nadia" : "Akin";
@@ -65,6 +72,8 @@ export function PlanSheet({
   const [values, setValues] = useState(() => ({
     ...plan,
     location: placeFor(plan),
+    durationMinutes: plan.durationMinutes ?? 120,
+    emailGuests: plan.emailGuests ?? false,
   }));
   const [requesting, setRequesting] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
@@ -194,7 +203,11 @@ export function PlanSheet({
       ],
     });
     if (saved === false) return;
-    announce("Plan approved. Invitations have not been sent.");
+    announce(
+      live
+        ? "Plan approved. Check email status for invitations and reminders."
+        : "Plan approved in this browser. No invitations were sent.",
+    );
   }
   async function request(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -286,8 +299,11 @@ export function PlanSheet({
               Request changes
             </button>
             <p className="field-help">
-              Approval records a decision here. Invitations are not sent in this
-              preview.
+              {live
+                ? plan.emailGuests
+                  ? "Approval queues invitations and reminders for guests who enabled outing emails. It does not book a venue."
+                  : "Guest email is turned off for this plan. Approval does not book a venue."
+                : "Approval records a local decision. No invitations are sent in this preview."}
             </p>
           </div>
           {difference < 0 && (
@@ -365,11 +381,24 @@ export function PlanSheet({
                   ? "This outing was cancelled. Its expense records are kept."
                   : plan.settledAt
                     ? "Expense recording is complete. The final record is kept here."
-                    : "Approved. Your team can RSVP here; invitations have not been sent."}
+                    : live
+                      ? "Approved. RSVP here and check email status below."
+                      : "Approved in this browser. No invitations were sent."}
         </p>
       </header>
+      {live && ["Approved", "Cancelled"].includes(plan.status) && (
+        <a
+          className="button button-outline calendar-export"
+          href={`/api/plans/${encodeURIComponent(plan.id)}/calendar`}
+        >
+          Download calendar event
+        </a>
+      )}
       <div className="sheet-layout">
         <div className="sheet-main">
+          {live && csrf && onChanged && (
+            <AvailabilityPanel plan={plan} csrf={csrf} onChanged={onChanged} />
+          )}
           {plan.reviewNote && (
             <aside
               className={`pinned-note ${plan.status === "Changes requested" && role === "employee" ? "" : "note-reference"}`}
@@ -474,6 +503,19 @@ export function PlanSheet({
                     <span className="field-help" id="people-limit">
                       Up to {experience.capacity} for this experience.
                     </span>
+                  </label>
+                  <label className="field">
+                    Duration (minutes)
+                    <input
+                      required
+                      type="number"
+                      min={30}
+                      max={480}
+                      value={values.durationMinutes}
+                      onChange={(e) =>
+                        change("durationMinutes", Number(e.target.value))
+                      }
+                    />
                   </label>
                   <label className="field">
                     Total budget (NGN)
@@ -639,8 +681,8 @@ export function PlanSheet({
                   <fieldset className="guest-picker">
                     <legend>Who is invited?</legend>
                     <p className="field-help">
-                      Choose teammates for the guest list. No invitations are
-                      emailed yet.
+                      Choose teammates for the guest list. Invitations wait for
+                      manager approval and each guest's email preferences.
                     </p>
                     {members.map((member) => (
                       <label key={member.id}>
@@ -661,8 +703,49 @@ export function PlanSheet({
                         />
                         {member.name}
                         {member.id === viewerId ? " (you)" : ""}
+                        {member.interests?.includes(experience.category)
+                          ? " · Interested in this activity"
+                          : ""}
                       </label>
                     ))}
+                    {members.some(
+                      (m) =>
+                        m.id !== viewerId &&
+                        m.interests?.includes(experience.category),
+                    ) && (
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={() =>
+                          change(
+                            "attendees",
+                            [
+                              viewerId,
+                              ...members
+                                .filter(
+                                  (m) =>
+                                    m.id !== viewerId &&
+                                    m.interests?.includes(experience.category),
+                                )
+                                .map((m) => m.id),
+                            ].slice(0, values.people),
+                          )
+                        }
+                      >
+                        Select interested teammates
+                      </button>
+                    )}
+                    <label className="check-option">
+                      <input
+                        type="checkbox"
+                        checked={values.emailGuests}
+                        onChange={(e) =>
+                          change("emailGuests", e.target.checked)
+                        }
+                      />
+                      Queue invitations and reminders after approval for guests
+                      who enabled outing emails
+                    </label>
                   </fieldset>
                 )}
                 {error && (
@@ -899,7 +982,10 @@ export function PlanSheet({
               <p className="field-help">
                 {plan.attendees.length} named teammates
                 {live ? "" : " in this preview"}; planning for {shown.people}{" "}
-                people. No invitations are sent.
+                people.{" "}
+                {live
+                  ? "Email invitations follow the plan and recipient preferences."
+                  : "No invitations are sent in this local preview."}
               </p>
             )}
           </section>
@@ -914,9 +1000,18 @@ export function PlanSheet({
                   </button>
                 )}
               </div>
-              <ExpenseLedger expenses={expenses} />
+              <ExpenseLedger
+                expenses={expenses}
+                locked={!!plan.settledAt || plan.status === "Cancelled"}
+                csrf={csrf}
+                onChanged={onChanged}
+              />
             </section>
           ) : null}
+          {live && csrf && onChanged && (
+            <InvitationActions plan={plan} csrf={csrf} onChanged={onChanged} />
+          )}
+          {live && <DeliveryStatus planId={plan.id} />}
           <section className="sheet-section">
             <div className="section-heading">
               <h2>Activity</h2>

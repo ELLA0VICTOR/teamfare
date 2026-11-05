@@ -15,7 +15,7 @@ export function ExpenseForm({
   plans: Plan[];
   defaultPlanId?: string;
   onClose: () => void;
-  onSubmit: (expense: Expense) => void;
+  onSubmit: (expense: Expense, receipt?: File) => void | Promise<void>;
 }) {
   const { live, viewerId, members } = useTeam();
   const viewer = members.find((member) => member.id === viewerId);
@@ -29,7 +29,10 @@ export function ExpenseForm({
         plan.attendees.includes(viewerId)),
   );
   const [error, setError] = useState("");
-  function submit(e: FormEvent<HTMLFormElement>) {
+  const [requestId] = useState(() => crypto.randomUUID());
+  const [receipt, setReceipt] = useState<File>();
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const amount = Number(data.get("amount")),
@@ -50,15 +53,37 @@ export function ExpenseForm({
       );
       return;
     }
-    onSubmit({
-      id: crypto.randomUUID(),
-      planId,
-      amount,
-      description,
-      date,
-      payer: String(data.get("payer")),
-      category: String(data.get("category")),
-    });
+    if (
+      receipt &&
+      (receipt.size > 5 * 1024 * 1024 ||
+        !["application/pdf", "image/png", "image/jpeg"].includes(receipt.type))
+    ) {
+      setError("Choose a PDF, JPEG or PNG receipt up to 5 MB.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSubmit(
+        {
+          id: requestId,
+          planId,
+          amount,
+          description,
+          date,
+          payer: String(data.get("payer")),
+          category: String(data.get("category")),
+        },
+        receipt,
+      );
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "The expense could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <Modal title="Add expense" drawer onClose={onClose}>
@@ -67,7 +92,7 @@ export function ExpenseForm({
         A clear record of what was spent, and who paid.
       </p>
       {eligible.length ? (
-        <form onSubmit={submit} className="expense-form">
+        <form onSubmit={(e) => void submit(e)} className="expense-form">
           <label className="field">
             Outing
             <select
@@ -148,6 +173,20 @@ export function ExpenseForm({
                 ))}
             </select>
           </label>
+          {live && (
+            <label className="field">
+              Receipt (optional)
+              <input
+                type="file"
+                accept="application/pdf,image/png,image/jpeg"
+                onChange={(e) => setReceipt(e.target.files?.[0])}
+              />
+              <span className="field-help">
+                PDF, JPEG or PNG, up to 5 MB. Private to the expense owner,
+                payer and managers.
+              </span>
+            </label>
+          )}
           {error && (
             <p className="form-error" role="alert">
               {error}
@@ -158,8 +197,12 @@ export function ExpenseForm({
               ? "Saved to your team. No payment or reimbursement is made."
               : "Saved in this browser. No payment or reimbursement is made."}
           </p>
-          <button className="button button-dark full-width" type="submit">
-            Record expense
+          <button
+            className="button button-dark full-width"
+            type="submit"
+            disabled={busy}
+          >
+            {busy ? "Recording…" : "Record expense"}
             <ArrowRight size={18} />
           </button>
         </form>

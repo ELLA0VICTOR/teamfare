@@ -3,7 +3,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import staticFiles from "@fastify/static";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { experiences, money } from "../src/data.ts";
@@ -18,6 +18,9 @@ import { registerIdentity, IdentityError } from "./identity.ts";
 import type { AuthMailer } from "./mail.ts";
 import { MailError } from "./mail.ts";
 import { digest, hashPassword, sessionCookie, token } from "./auth.ts";
+import { WorkflowError, WorkflowService } from "./workflow-service.ts";
+import { registerWorkflowRoutes } from "./workflow-routes.ts";
+import { outingStart } from "../src/workflows.ts";
 
 class HttpError extends Error {
   statusCode: number;
@@ -42,6 +45,8 @@ const details = z
     location: text(100),
     note: z.string().trim().max(500),
     attendees: z.array(z.string()).max(20),
+    durationMinutes: z.number().int().min(30).max(480).optional(),
+    emailGuests: z.boolean().optional(),
   })
   .strict();
 const preferences = [
@@ -105,10 +110,34 @@ export async function createApp(
         : false,
   });
   await app.register(cookie);
-  await app.register(rateLimit, { max: 180, timeWindow: "1 minute" });
+  await app.register(rateLimit, {
+    max: 180,
+    timeWindow: "1 minute",
+    keyGenerator(request) {
+      const value = request.cookies[sessionCookie];
+      if (value && value.length <= 256) {
+        const session = store.db
+          .prepare(
+            "SELECT user_id FROM sessions WHERE hash=? AND expires>? AND last_seen>?",
+          )
+          .get(digest(value), Date.now(), Date.now() - 30 * 60000) as
+          { user_id: string } | undefined;
+        if (session) return "member:" + session.user_id;
+      }
+      return "ip:" + request.ip;
+    },
+  });
   const dummyPassword = await hashPassword(token());
   const research = new ResearchService(store, options.agentProviders);
+  const workflows = new WorkflowService(store, origin, {
+    mailer: options.mailer,
+    secret: options.authSecret ?? process.env.AUTH_SECRET ?? "",
+  });
+  app.addHook("onReady", async () => {
+    workflows.start();
+  });
   app.addHook("onClose", async () => {
+    await workflows.close();
     await research.close();
     store.close();
   });
@@ -140,6 +169,8 @@ export async function createApp(
     if (error instanceof HttpError)
       return reply.code(error.statusCode).send({ error: error.message });
     if (error instanceof ResearchError)
+      return reply.code(error.statusCode).send({ error: error.message });
+    if (error instanceof WorkflowError)
       return reply.code(error.statusCode).send({ error: error.message });
     if (error instanceof IdentityError)
       return reply.code(error.statusCode).send({ error: error.message });
@@ -191,6 +222,9 @@ export async function createApp(
         name: auth.user.name,
         email: auth.user.email,
         role: auth.user.role,
+        judge: store.isJudge(auth.user),
+        outingEmails: !!auth.user.outing_emails,
+        interests: JSON.parse(auth.user.interests) as string[],
       },
       team,
       members: store.members(auth.user.team_id),
@@ -260,19 +294,37 @@ export async function createApp(
     };
   }
   function write(plan: Plan, teamId: string, revision: number) {
-    const result = store.db
-      .prepare(
-        "UPDATE plans SET data = ?, revision = revision + 1 WHERE id = ? AND team_id = ? AND revision = ?",
-      )
-      .run(JSON.stringify(plan), plan.id, teamId, revision);
-    if (Number(result.changes) !== 1)
-      fail(
-        409,
-        "This plan changed elsewhere. Refresh and review the latest version.",
-      );
-    return { ...plan, revision: revision + 1 };
+    return store.transaction(() => {
+      const previous = store.plan(plan.id, teamId);
+      const result = store.db
+        .prepare(
+          "UPDATE plans SET data = ?, revision = revision + 1 WHERE id = ? AND team_id = ? AND revision = ?",
+        )
+        .run(JSON.stringify(plan), plan.id, teamId, revision);
+      if (Number(result.changes) !== 1)
+        fail(
+          409,
+          "This plan changed elsewhere. Refresh and review the latest version.",
+        );
+      const saved = { ...plan, revision: revision + 1 };
+      if (previous)
+        workflows.planChanged(JSON.parse(previous.data) as Plan, saved, teamId);
+      return saved;
+    });
   }
-  app.get("/api/health", async () => ({ ok: true }));
+  registerWorkflowRoutes(app, store, workflows, {
+    authenticate,
+    planFor,
+    write,
+  });
+  app.get("/api/health", async () => {
+    store.db
+      .prepare(
+        "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1",
+      )
+      .get();
+    return { ok: true };
+  });
   app.get("/api/session", async (request) => {
     if (!request.cookies[sessionCookie]) return { user: null };
     try {
@@ -307,6 +359,11 @@ export async function createApp(
   });
   app.post("/api/invites", async (request) => {
     const { user } = authenticate(request, true);
+    if (store.isJudge(user))
+      return fail(
+        403,
+        "Shared judge accounts cannot invite people. Create your own team for private use.",
+      );
     if (user.role !== "manager")
       return fail(403, "Only a manager can invite teammates.");
     const input = z
@@ -525,10 +582,10 @@ export async function createApp(
                     .price) * plan.people) > plan.budget
           )
             return fail(400, "An over-budget plan cannot be approved.");
-          if (plan.date < today())
+          if (outingStart(plan).getTime() <= Date.now())
             return fail(400, "Request a new date before approving this plan.");
           next.status = "Approved";
-          message = `${user.name} approved the plan. No invitations were sent.`;
+          message = `${user.name} approved the plan.${plan.emailGuests ? " Email invitations and reminders follow each guest's notification preferences." : " Guest email is turned off for this plan."}`;
         } else {
           if (!input.note)
             return fail(400, "Explain what the organiser needs to change.");
@@ -619,10 +676,35 @@ export async function createApp(
         date: dateSchema,
         payer: text(80),
         category: z.enum(["Food & drinks", "Activity", "Transport", "Other"]),
+        requestId: z.uuid().optional(),
       })
       .strict()
       .parse(request.body);
     return store.transaction(() => {
+      const { requestId, ...fields } = input;
+      const fingerprint = createHash("sha256")
+        .update(JSON.stringify(fields))
+        .digest("hex");
+      if (requestId) {
+        const old = store.db
+          .prepare(
+            "SELECT expense_id,payload_hash FROM expense_requests WHERE user_id=? AND request_id=?",
+          )
+          .get(user.id, requestId) as
+          { expense_id: string; payload_hash: string } | undefined;
+        if (old) {
+          if (old.payload_hash !== fingerprint)
+            return fail(
+              409,
+              "That expense request was already used with different details. Refresh your records before retrying.",
+            );
+          const existing = store.db
+            .prepare("SELECT data FROM expenses WHERE id=? AND team_id=?")
+            .get(old.expense_id, user.team_id) as { data: string } | undefined;
+          if (existing) return JSON.parse(existing.data);
+          return fail(409, "The earlier expense is no longer available.");
+        }
+      }
       const { plan, row } = planFor(input.planId, user);
       if (plan.status !== "Approved" || plan.settledAt)
         return fail(
@@ -644,7 +726,7 @@ export async function createApp(
       if (user.role !== "manager" && payer.id !== user.id)
         return fail(403, "Employees can record only their own spending.");
       const expense = {
-        ...input,
+        ...fields,
         payer: payer.name,
         payerId: payer.id,
         createdBy: user.id,
@@ -661,6 +743,12 @@ export async function createApp(
           user.id,
           JSON.stringify(expense),
         );
+      if (requestId)
+        store.db
+          .prepare(
+            "INSERT INTO expense_requests(user_id,request_id,expense_id,payload_hash) VALUES(?,?,?,?)",
+          )
+          .run(user.id, requestId, expense.id, fingerprint);
       write(
         {
           ...plan,

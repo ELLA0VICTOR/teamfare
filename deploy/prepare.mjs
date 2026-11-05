@@ -33,7 +33,12 @@ async function collect(directory) {
     if (entry.isSymbolicLink())
       throw new Error("Release packaging rejects symbolic links.");
     const path = directory + "/" + entry.name;
-    if (path === "server/tests") continue;
+    if (
+      path === "server/tests" ||
+      entry.name === "__pycache__" ||
+      entry.name.endsWith(".pyc")
+    )
+      continue;
     if (entry.isDirectory()) await collect(path);
     else if (entry.isFile()) files.push(path);
   }
@@ -47,15 +52,30 @@ const secretNames = [
   "RESEND_API_KEY",
   "AUTH_SECRET",
 ];
+const protectedValues = secretNames
+  .map((name) => environment[name])
+  .filter(Boolean);
+for (const [name, parse] of [
+  ["production.env", parseEnv],
+  ["backup-config.json", JSON.parse],
+]) {
+  try {
+    const local = parse(await readFile(join(folder, name), "utf8"));
+    for (const key of [
+      "AUTH_SECRET",
+      "access_key",
+      "secret_key",
+      "encryption_key",
+    ])
+      if (local[key]) protectedValues.push(local[key]);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
 for (const file of files) {
   if (/[\r\n]/.test(file)) throw new Error("Unsafe release filename.");
   const data = await readFile(join(root, file));
-  if (
-    secretNames.some(
-      (name) =>
-        environment[name] && data.includes(Buffer.from(environment[name])),
-    )
-  )
+  if (protectedValues.some((value) => data.includes(Buffer.from(value))))
     throw new Error("A runtime secret was found in a release source file.");
 }
 const manifest = join(folder, "manifest.txt");

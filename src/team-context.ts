@@ -7,6 +7,7 @@ export type Member = {
   initials: string;
   team: string;
   role?: "employee" | "manager";
+  interests?: string[];
 };
 export type Connection = {
   user: {
@@ -14,6 +15,9 @@ export type Connection = {
     name: string;
     email: string;
     role: "employee" | "manager";
+    judge?: boolean;
+    outingEmails?: boolean;
+    interests?: string[];
   };
   team: { id: string; name: string };
   members: Member[];

@@ -41,12 +41,16 @@ export function AccountGate({
   );
   const [challenge, setChallenge] = useState(restoreChallenge),
     [notice, setNotice] = useState(""),
+    [judgeAccess, setJudgeAccess] = useState(false),
     [ready, setReady] = useState<boolean | null>(null);
   useEffect(() => {
     const lifecycle = new AbortController();
-    void api<{ ready: boolean }>("/auth/config")
+    void api<{ ready: boolean; judgeAccess?: boolean }>("/auth/config")
       .then((result) => {
-        if (!lifecycle.signal.aborted) setReady(result.ready);
+        if (!lifecycle.signal.aborted) {
+          setReady(result.ready);
+          setJudgeAccess(!!result.judgeAccess);
+        }
       })
       .catch(() => {
         if (!lifecycle.signal.aborted) setReady(false);
@@ -64,14 +68,20 @@ export function AccountGate({
     event.preventDefault();
     setError("");
     setBusy(true);
-    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const data: Record<string, unknown> = Object.fromEntries(
+      new FormData(event.currentTarget),
+    );
+    if (mode === "register" || mode === "join")
+      data.outingEmails = data.outingEmails === "on";
     try {
-      changeChallenge(
-        await api<AuthChallenge>(
-          `/auth/${mode === "forgot" ? "forgot-password" : mode}`,
-          data,
-        ),
+      const result = await api<AuthChallenge | Connection>(
+        `/auth/${mode === "forgot" ? "forgot-password" : mode}`,
+        data,
       );
+      if ("user" in result) {
+        changeChallenge(null);
+        onSignIn(result);
+      } else changeChallenge(result);
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : "Unable to sign in.",
@@ -128,6 +138,12 @@ export function AccountGate({
                   : mode === "forgot"
                     ? "We’ll email a code if this address has a Teamfare account."
                     : "Use your manager’s invitation and verify your email before joining."}
+            </p>
+          )}
+          {judgeAccess && !challenge && mode === "login" && (
+            <p className="field-help">
+              Judging? The public accounts listed in our GitHub README sign in
+              without an email code. Use sample information only.
             </p>
           )}
           {ready === false && (
@@ -275,9 +291,19 @@ export function AccountGate({
                     {error}
                   </p>
                 )}
+                {(mode === "register" || mode === "join") && (
+                  <label className="check-option">
+                    <input type="checkbox" name="outingEmails" />
+                    Email me outing invitations, availability requests, review
+                    updates and reminders. I can change this later.
+                  </label>
+                )}
                 <button
                   className="button button-dark"
-                  disabled={busy || ready !== true}
+                  disabled={
+                    busy ||
+                    !(ready === true || (mode === "login" && judgeAccess))
+                  }
                   type="submit"
                 >
                   {busy
