@@ -16,7 +16,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "node server/index.ts",
+      command: "node tests/live/server.ts",
       url: "http://127.0.0.1:3002/api/health",
       env: {
         PORT: "3002",

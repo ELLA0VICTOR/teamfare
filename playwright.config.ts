@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
   outputDir: "./test-results/preview",
-  testIgnore: "**/live/**",
+  testIgnore: ["**/live/**", "**/agent/**"],
   fullyParallel: true,
   workers: 2,
   timeout: 30000,

@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { ArrowRight, Bookmark, ChevronDown, Plus } from "lucide-react";
 import { dateLabel, experiences, localDate, money } from "../data";
 import type { Category, Demo, Experience } from "../data";
-import { needsYou, placeFor } from "../plan";
+import { needsYou, placeFor, planExperience } from "../plan";
 import type { Role } from "../plan";
 import { ExperienceArt } from "./ExperienceArt";
 import { useTeam } from "../team-context";
@@ -27,12 +27,14 @@ export function Home({
   demo,
   role,
   onStart,
+  onResearch,
   onSaveIdea,
   onExplore,
 }: {
   demo: Demo;
   role: Role;
   onStart: (values: ComposerValues, experienceId?: string) => void;
+  onResearch?: (values: ComposerValues) => void;
   onSaveIdea: (id: string) => void;
   onExplore: (experience: Experience) => void;
 }) {
@@ -62,9 +64,7 @@ export function Home({
       (a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time),
     );
   const nextPlan = urgent[0] ?? upcoming[0];
-  const nextExperience =
-    experiences.find((item) => item.id === nextPlan?.experienceId) ??
-    experiences[0];
+  const nextExperience = nextPlan ? planExperience(nextPlan) : experiences[0];
   const isYourMove = nextPlan
     ? needsYou(nextPlan, role, live ? viewerId : "akin")
     : false;
@@ -97,7 +97,11 @@ export function Home({
   );
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    onStart({
+    const submitter = (e.nativeEvent as SubmitEvent)
+      .submitter as HTMLButtonElement | null;
+    const action =
+      onResearch && submitter?.value !== "manual" ? onResearch : onStart;
+    action({
       brief,
       people: Number(people),
       location,
@@ -209,15 +213,30 @@ export function Home({
               </label>
             </div>
             <div className="composer-actions">
-              <button type="submit" className="button button-dark">
+              {onResearch && (
+                <button
+                  type="submit"
+                  value="research"
+                  className="button button-dark"
+                >
+                  Research options
+                  <ArrowRight size={18} />
+                </button>
+              )}
+              <button
+                type="submit"
+                value="manual"
+                className={`button ${onResearch ? "button-outline" : "button-dark"}`}
+              >
                 Start a plan
                 <ArrowRight size={18} />
               </button>
             </div>
           </form>
           <p className="field-help composer-note">
-            Start with a sample experience. AI research, booking and invitations
-            aren’t connected yet.
+            {onResearch
+              ? "Research uses public web sources. You review the draft; nothing is booked or emailed."
+              : "Start with a sample experience. AI research, booking and invitations aren’t connected yet."}
           </p>
         </div>
         <aside className="next-up" aria-labelledby="next-up-heading">
@@ -226,6 +245,11 @@ export function Home({
           </span>
           <div className="next-up-image">
             <ExperienceArt experience={nextExperience} />
+            {nextPlan?.proposal && (
+              <span className="field-help">
+                Activity image; not a photo of this venue.
+              </span>
+            )}
           </div>
           <span
             className={`status-text ${isYourMove ? "needs-action" : nextPlan?.status === "Approved" ? "is-approved" : ""}`}
@@ -286,6 +310,31 @@ export function Home({
           )}
         </aside>
       </section>
+      {live && !!demo.researchRuns?.length && (
+        <section className="recent-research">
+          <div className="section-heading">
+            <h2>Recent research</h2>
+            <span>Pick up where you left off</span>
+          </div>
+          {demo.researchRuns.map((run) => (
+            <a key={run.id} href={`#research/${run.id}`}>
+              <span>{run.input.brief}</span>
+              <small>
+                {run.status === "completed"
+                  ? run.selectedPlanId
+                    ? "Draft saved"
+                    : "Options ready"
+                  : run.status === "running"
+                    ? "In progress"
+                    : run.status === "cancelled"
+                      ? "Cancelled"
+                      : "Needs attention"}
+              </small>
+              <ArrowRight size={16} />
+            </a>
+          ))}
+        </section>
+      )}
       <section className="ideas-section" aria-labelledby="ideas-heading">
         <div className="section-heading ideas-heading">
           <div>

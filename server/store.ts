@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Plan, Expense } from "../src/data.ts";
+import type { ResearchRun } from "../src/research.ts";
 
 export type UserRow = {
   id: string;
@@ -12,6 +13,8 @@ export type UserRow = {
   role: "employee" | "manager";
   department: string;
   preference: string;
+  email_verified_at: string | null;
+  auth_version: number;
 };
 export type PlanRow = {
   id: string;
@@ -66,7 +69,51 @@ export class Store {
         PRIMARY KEY(user_id, experience_id)
       );
       INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
+      CREATE TABLE IF NOT EXISTS research_runs (
+        id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id), user_id TEXT NOT NULL REFERENCES users(id),
+        request_id TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL,
+        UNIQUE(user_id,request_id)
+      );
+      CREATE INDEX IF NOT EXISTS research_user ON research_runs(user_id,created_at);
+      INSERT OR IGNORE INTO schema_migrations(version) VALUES(2);
     `);
+    const version3 = this.db
+      .prepare("SELECT version FROM schema_migrations WHERE version=3")
+      .get();
+    if (!version3)
+      this.transaction(() => {
+        this.db.exec(`
+        ALTER TABLE users ADD COLUMN email_verified_at TEXT;
+        ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;
+        DELETE FROM sessions;
+        CREATE TABLE auth_challenges (
+          id TEXT PRIMARY KEY, purpose TEXT NOT NULL, email TEXT NOT NULL,
+          user_id TEXT REFERENCES users(id) ON DELETE CASCADE, code_hash TEXT NOT NULL,
+          payload TEXT NOT NULL, expires INTEGER NOT NULL, resend_at INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0, sends INTEGER NOT NULL DEFAULT 1,
+          state TEXT NOT NULL, consumed_at INTEGER
+        );
+        CREATE INDEX challenges_email ON auth_challenges(email,expires);
+        CREATE TABLE auth_limits (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);
+        CREATE TABLE auth_audit (id INTEGER PRIMARY KEY, user_id TEXT REFERENCES users(id),event TEXT NOT NULL,at INTEGER NOT NULL);
+        CREATE TABLE auth_notifications (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL,
+          created_at INTEGER NOT NULL, sent_at INTEGER, attempts INTEGER NOT NULL DEFAULT 0, retry_at INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO schema_migrations(version) VALUES(3);
+      `);
+      });
+    if (
+      !this.db
+        .prepare("SELECT version FROM schema_migrations WHERE version=4")
+        .get()
+    )
+      this.transaction(() => {
+        this.db
+          .exec(`ALTER TABLE sessions ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0;
+        DELETE FROM sessions;
+        INSERT INTO schema_migrations(version) VALUES(4);`);
+      });
   }
   transaction<T>(work: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -137,6 +184,13 @@ export class Store {
           .all(user.id) as { experience_id: string }[]
       ).map((row) => row.experience_id),
       preference: user.preference,
+      researchRuns: (
+        this.db
+          .prepare(
+            "SELECT data FROM research_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT 5",
+          )
+          .all(user.id) as { data: string }[]
+      ).map((row) => JSON.parse(row.data) as ResearchRun),
     };
   }
   close() {

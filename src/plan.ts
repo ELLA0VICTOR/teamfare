@@ -1,4 +1,6 @@
-import { experienceFor, localDate } from "./data";
+import { experienceFor, experiences, localDate } from "./data";
+import type { Experience } from "./data";
+import { costTotal } from "./research";
 import type { Plan, PlanEvent } from "./data";
 
 export type Role = "employee" | "manager";
@@ -29,11 +31,37 @@ export function needsYou(plan: Plan, role: Role, viewerId = "akin") {
       !plan.declined?.includes(viewerId))
   );
 }
-export const totalFor = (plan: Plan) => priceFor(plan) * plan.people;
+export const totalFor = (plan: Plan) =>
+  plan.proposal
+    ? costTotal(plan.proposal.costs, plan.people)
+    : priceFor(plan) * plan.people;
 export const priceFor = (plan: Plan) =>
-  plan.unitPrice ?? experienceFor(plan.experienceId).price;
+  plan.proposal
+    ? costTotal(plan.proposal.costs, plan.people) / Math.max(1, plan.people)
+    : (plan.unitPrice ?? experienceFor(plan.experienceId).price);
 export const placeFor = (plan: Plan) =>
-  plan.location || experienceFor(plan.experienceId).area;
+  plan.location || planExperience(plan).area;
+export function planExperience(plan: Plan): Experience {
+  if (!plan.proposal) return experienceFor(plan.experienceId);
+  const proposal = plan.proposal;
+  return {
+    id: "researched",
+    name: proposal.venueName,
+    category: proposal.category,
+    subtitle: proposal.summary,
+    area: placeForLocation(plan),
+    price: priceFor(plan),
+    duration: proposal.duration,
+    description: proposal.summary,
+    includes: [proposal.summary],
+    capacity: 20,
+    image: experiences.find((item) => item.category === proposal.category)
+      ?.image,
+  };
+}
+function placeForLocation(plan: Plan) {
+  return plan.location || plan.proposal?.location || "Location to confirm";
+}
 export const nextAction = (plan: Plan, role: Role, viewerId = "akin") =>
   plan.status === "Awaiting approval"
     ? role === "manager" && plan.createdBy !== viewerId

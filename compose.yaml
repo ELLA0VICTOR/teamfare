@@ -1,10 +1,43 @@
 services:
   teamfare:
     build: .
+    image: teamfare:${TEAMFARE_RELEASE:-local}
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the public HTTPS URL}
       TRUST_PROXY: "1"
+      VULTR_INFERENCE_API_KEY: ${VULTR_INFERENCE_API_KEY:-}
+      VULTR_INFERENCE_MODEL: ${VULTR_INFERENCE_MODEL:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      AUTH_SECRET: ${AUTH_SECRET:?Set a random AUTH_SECRET of at least 32 characters}
     ports:
       - "127.0.0.1:3001:3001"
     volumes:

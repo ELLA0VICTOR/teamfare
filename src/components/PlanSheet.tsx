@@ -16,11 +16,20 @@ import {
   money,
 } from "../data";
 import type { Expense, Plan } from "../data";
-import { event, needsYou, placeFor, priceFor } from "../plan";
+import {
+  event,
+  needsYou,
+  placeFor,
+  priceFor,
+  planExperience,
+  totalFor,
+} from "../plan";
 import type { Role } from "../plan";
 import { useTeam } from "../team-context";
 import { RouteLine } from "./RouteLine";
 import { ExpenseLedger } from "./ExpenseLedger";
+import { Evidence } from "./Evidence";
+import type { CostLine, ItineraryItem } from "../research";
 
 export function PlanSheet({
   plan,
@@ -61,15 +70,44 @@ export function PlanSheet({
   const [reviewNote, setReviewNote] = useState("");
   const [error, setError] = useState("");
   const shown = editable ? values : plan;
-  const experience = experienceFor(shown.experienceId);
+  const experience = planExperience(shown);
   const unitPrice = priceFor(shown);
-  const total = unitPrice * shown.people;
+  const total = totalFor(shown);
   const difference = shown.budget - total;
   const spent = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const isGoing = plan.going.includes(live ? viewerId : "akin"),
     declined = plan.declined?.includes(live ? viewerId : "akin");
   function change<K extends keyof Plan>(key: K, value: Plan[K]) {
     setValues((current) => ({ ...current, [key]: value }));
+  }
+  function editCost(index: number, patch: Partial<CostLine>) {
+    if (!values.proposal) return;
+    change("proposal", {
+      ...values.proposal,
+      organiserEdited: true,
+      costs: values.proposal.costs.map((line, i) =>
+        i === index
+          ? {
+              ...line,
+              ...patch,
+              basis: "estimate",
+              sourceId: undefined,
+              quote: undefined,
+            }
+          : line,
+      ),
+    });
+  }
+  function editItinerary(index: number, patch: Partial<ItineraryItem>) {
+    if (!values.proposal) return;
+    if (index === 0 && patch.time) change("time", patch.time);
+    change("proposal", {
+      ...values.proposal,
+      organiserEdited: true,
+      itinerary: values.proposal.itinerary.map((item, i) =>
+        i === index ? { ...item, ...patch } : item,
+      ),
+    });
   }
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -101,6 +139,10 @@ export function PlanSheet({
       setError(
         "The estimate is above your budget. Adjust the budget or save a draft.",
       );
+      return;
+    }
+    if (values.proposal && total <= 0) {
+      setError("Add a positive estimate before saving.");
       return;
     }
     const attendees = live
@@ -208,7 +250,11 @@ export function PlanSheet({
               <dt>Estimated cost</dt>
               <dd>
                 {money(total)} total
-                <small>{money(unitPrice)} per person</small>
+                <small>
+                  {shown.proposal ? "≈ " : ""}
+                  {money(unitPrice)}{" "}
+                  {shown.proposal ? "average per person" : "per person"}
+                </small>
               </dd>
             </div>
             <div>
@@ -361,15 +407,22 @@ export function PlanSheet({
                     <select
                       value={values.experienceId}
                       onChange={(e) => {
+                        if (e.target.value === "researched") return;
                         const next = experienceFor(e.target.value);
                         setValues((current) => ({
                           ...current,
                           experienceId: next.id,
+                          proposal: undefined,
                           location: next.area,
                           unitPrice: next.price,
                         }));
                       }}
                     >
+                      {values.proposal && (
+                        <option value="researched">
+                          {values.proposal.venueName} (researched)
+                        </option>
+                      )}
                       {experiences.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.name}
@@ -444,6 +497,144 @@ export function PlanSheet({
                     />
                   </label>
                 </div>
+                {values.proposal && (
+                  <div className="proposal-editor">
+                    <h3>Cost assumptions</h3>
+                    <p className="field-help">
+                      Edit amounts in whole NGN. Changes become organiser
+                      estimates; source evidence stays attached.
+                    </p>
+                    {values.proposal.costs.map((line, index) => (
+                      <div className="proposal-cost-edit" key={index}>
+                        <label className="field">
+                          Item
+                          <input
+                            required
+                            maxLength={80}
+                            value={line.label}
+                            onChange={(event) =>
+                              editCost(index, { label: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          Amount (NGN)
+                          <input
+                            required
+                            type="number"
+                            min={0}
+                            max={10000000}
+                            step={1}
+                            value={line.amount}
+                            onChange={(event) =>
+                              editCost(index, {
+                                amount: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          Basis
+                          <select
+                            value={line.unit}
+                            onChange={(event) =>
+                              editCost(index, {
+                                unit: event.target.value as CostLine["unit"],
+                              })
+                            }
+                          >
+                            <option value="per_person">Per person</option>
+                            <option value="fixed">Fixed total</option>
+                          </select>
+                        </label>
+                        {values.proposal!.costs.length > 1 && (
+                          <button
+                            type="button"
+                            className="text-button"
+                            aria-label={`Remove cost ${index + 1}`}
+                            onClick={() =>
+                              change("proposal", {
+                                ...values.proposal!,
+                                organiserEdited: true,
+                                costs: values.proposal!.costs.filter(
+                                  (_, i) => i !== index,
+                                ),
+                              })
+                            }
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {values.proposal.costs.length < 6 && (
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={() =>
+                          change("proposal", {
+                            ...values.proposal!,
+                            organiserEdited: true,
+                            costs: [
+                              ...values.proposal!.costs,
+                              {
+                                label: "Additional cost",
+                                amount: 0,
+                                unit: "fixed",
+                                basis: "estimate",
+                              },
+                            ],
+                          })
+                        }
+                      >
+                        Add a cost line
+                      </button>
+                    )}
+                    <h3>Itinerary</h3>
+                    {values.proposal.itinerary.map((item, index) => (
+                      <div className="proposal-itinerary-edit" key={index}>
+                        <label className="field">
+                          Step {index + 1} time
+                          <input
+                            required
+                            type="time"
+                            value={index === 0 ? values.time : item.time}
+                            onChange={(event) =>
+                              editItinerary(index, { time: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          Step {index + 1} title
+                          <input
+                            required
+                            maxLength={100}
+                            value={item.title}
+                            onChange={(event) =>
+                              editItinerary(index, {
+                                title: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="field field-full">
+                          Step {index + 1} details
+                          <textarea
+                            required
+                            maxLength={300}
+                            rows={2}
+                            value={item.details}
+                            onChange={(event) =>
+                              editItinerary(index, {
+                                details: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {live && (
                   <fieldset className="guest-picker">
                     <legend>Who is invited?</legend>
@@ -500,24 +691,44 @@ export function PlanSheet({
               <h2>The outing</h2>
               <span>{experience.duration}</span>
             </div>
-            <div className="itinerary-row">
-              <span className="itinerary-time">{shown.time}</span>
-              <div>
-                <h3>{experience.name}</h3>
-                <p>{placeFor(shown)}</p>
-                <p className="field-help">{experience.includes[0]}</p>
+            {shown.proposal ? (
+              <>
+                <h3 className="researched-venue-name">
+                  {shown.proposal.venueName}
+                </h3>
+                {shown.proposal.itinerary.map((item, index) => (
+                  <div className="itinerary-row" key={index}>
+                    <time className="itinerary-time">
+                      {index === 0 ? shown.time : item.time}
+                    </time>
+                    <div>
+                      <h3>{item.title}</h3>
+                      <p>{item.details}</p>
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="itinerary-row">
+                <span className="itinerary-time">{shown.time}</span>
+                <div>
+                  <h3>{experience.name}</h3>
+                  <p>{placeFor(shown)}</p>
+                  <p className="field-help">{experience.includes[0]}</p>
+                </div>
+                <span className="amount">
+                  {money(total)}
+                  <small>estimated total</small>
+                </span>
               </div>
-              <span className="amount">
-                {money(total)}
-                <small>estimated total</small>
-              </span>
-            </div>
+            )}
             {!editable && plan.note && (
               <p className="outing-note">{plan.note}</p>
             )}
             <p className="field-help section-footnote">
-              Sample experience and estimated prices. Venue availability and
-              booking are not connected.
+              {shown.proposal
+                ? "Based on public research. Venue availability, dietary suitability and final prices are not confirmed."
+                : "Sample experience and estimated prices. Venue availability and booking are not connected."}
             </p>
           </section>
           <section className="sheet-section">
@@ -526,21 +737,50 @@ export function PlanSheet({
               <span>Estimated · NGN</span>
             </div>
             <dl className="cost-ledger">
-              <div>
-                <dt>
-                  {experience.name}
-                  <small>
-                    {money(unitPrice)} per person × {shown.people}
-                  </small>
-                </dt>
-                <dd>{money(total)} total</dd>
-              </div>
+              {shown.proposal ? (
+                shown.proposal.costs.map((line, index) => (
+                  <div key={index}>
+                    <dt>
+                      {line.label}
+                      <small>
+                        {money(line.amount)}{" "}
+                        {line.unit === "fixed"
+                          ? "fixed total"
+                          : `per person × ${shown.people}`}{" "}
+                        ·{" "}
+                        {line.basis === "published"
+                          ? "published figure; confirm terms"
+                          : "estimate"}
+                      </small>
+                    </dt>
+                    <dd>
+                      {money(
+                        line.amount *
+                          (line.unit === "per_person" ? shown.people : 1),
+                      )}{" "}
+                      total
+                    </dd>
+                  </div>
+                ))
+              ) : (
+                <div>
+                  <dt>
+                    {experience.name}
+                    <small>
+                      {money(unitPrice)} per person × {shown.people}
+                    </small>
+                  </dt>
+                  <dd>{money(total)} total</dd>
+                </div>
+              )}
               <div className="ledger-total">
                 <dt>Estimated total</dt>
                 <dd>
                   {money(total)}
                   <small>
-                    {money(shown.people ? total / shown.people : 0)} per person
+                    {shown.proposal ? "≈ " : ""}
+                    {money(shown.people ? total / shown.people : 0)}{" "}
+                    {shown.proposal ? "average per person" : "per person"}
                   </small>
                 </dd>
               </div>
@@ -562,10 +802,44 @@ export function PlanSheet({
               )}
             </dl>
             <p className="field-help">
-              Estimate covers the listed experience only. Transport and extras
-              may need additional budget.
+              {shown.proposal
+                ? "Estimate is the sum of the listed assumptions. Confirm taxes, service charges, transport and extras with the venue."
+                : "Estimate covers the listed experience only. Transport and extras may need additional budget."}
             </p>
           </section>
+          {shown.proposal && (
+            <section className="sheet-section research-provenance">
+              <div className="section-heading">
+                <h2>Research and sources</h2>
+                <a
+                  className="text-button"
+                  href={`#research/${shown.proposal.runId}`}
+                >
+                  Original research
+                </a>
+              </div>
+              <p>{shown.proposal.reason}</p>
+              {shown.proposal.organiserEdited && (
+                <p className="field-help">
+                  The organiser has edited costs or itinerary since the original
+                  research.
+                </p>
+              )}
+              <p className="dietary-notes">
+                <strong>Dietary considerations</strong>
+                {shown.proposal.dietaryNotes}
+              </p>
+              <div className="open-questions">
+                <h3>Still to confirm</h3>
+                <ul>
+                  {shown.proposal.openQuestions.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
+                </ul>
+              </div>
+              <Evidence option={shown.proposal} />
+            </section>
+          )}
           <section className="sheet-section">
             <div className="section-heading">
               <h2>The people</h2>
@@ -687,7 +961,10 @@ export function PlanSheet({
             <span className="rail-label">Estimated total</span>
             <strong className="rail-total">{money(total)}</strong>
             <span>
-              {money(unitPrice)} per person · {shown.people} people
+              {shown.proposal ? "≈ " : ""}
+              {money(unitPrice)}{" "}
+              {shown.proposal ? "average per person" : "per person"} ·{" "}
+              {shown.people} people
             </span>
             <div className="rail-budget">
               <span>

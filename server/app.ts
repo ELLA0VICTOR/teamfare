@@ -9,14 +9,15 @@ import { z } from "zod";
 import { experiences, money } from "../src/data.ts";
 import type { Plan } from "../src/data.ts";
 import { Store } from "./store.ts";
+import { ResearchService, ResearchError } from "./agent/service.ts";
+import type { AgentProviders } from "./agent/providers.ts";
+import { costSchema, itinerarySchema } from "./agent/runner.ts";
+import { costTotal } from "../src/research.ts";
 import type { UserRow } from "./store.ts";
-import {
-  digest,
-  hashPassword,
-  sessionCookie,
-  token,
-  verifyPassword,
-} from "./auth.ts";
+import { registerIdentity, IdentityError } from "./identity.ts";
+import type { AuthMailer } from "./mail.ts";
+import { MailError } from "./mail.ts";
+import { digest, hashPassword, sessionCookie, token } from "./auth.ts";
 
 class HttpError extends Error {
   statusCode: number;
@@ -29,14 +30,6 @@ const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
 const text = (max: number) => z.string().trim().min(1).max(max);
-const account = z.object({
-  name: text(80),
-  email: z
-    .email()
-    .max(254)
-    .transform((value) => value.toLowerCase()),
-  password: z.string().min(12).max(128),
-});
 const dateSchema = z.iso.date();
 const details = z
   .object({
@@ -57,7 +50,12 @@ const preferences = [
   "Vegan options",
   "Halal options",
 ] as const;
-type SessionRow = { user_id: string; csrf: string; expires: number };
+type SessionRow = {
+  user_id: string;
+  csrf: string;
+  expires: number;
+  last_seen: number;
+};
 type Auth = { user: UserRow; csrf: string };
 const today = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -79,6 +77,9 @@ export async function createApp(
     production?: boolean;
     serveStatic?: boolean;
     authLimit?: number;
+    agentProviders?: AgentProviders;
+    mailer?: AuthMailer;
+    authSecret?: string;
   } = {},
 ) {
   const production =
@@ -88,6 +89,8 @@ export async function createApp(
   ).origin;
   if (production && !origin.startsWith("https://"))
     throw new Error("Production APP_ORIGIN must use HTTPS.");
+  if (production && options.agentProviders)
+    throw new Error("Injected test providers are not allowed in production.");
   const store = new Store(
     options.databasePath ??
       process.env.DATABASE_PATH ??
@@ -96,19 +99,19 @@ export async function createApp(
   const app = Fastify({
     bodyLimit: 32 * 1024,
     logger: false,
-    trustProxy: process.env.TRUST_PROXY === "1" ? (_address: string, hop: number) => hop === 0 : false,
+    trustProxy:
+      process.env.TRUST_PROXY === "1"
+        ? (_address: string, hop: number) => hop === 0
+        : false,
   });
   await app.register(cookie);
   await app.register(rateLimit, { max: 180, timeWindow: "1 minute" });
-  const authRate = {
-    rateLimit: {
-      max: options.authLimit ?? 10,
-      timeWindow: "10 minutes",
-      groupId: "account-access",
-    },
-  };
   const dummyPassword = await hashPassword(token());
-  app.addHook("onClose", () => store.close());
+  const research = new ResearchService(store, options.agentProviders);
+  app.addHook("onClose", async () => {
+    await research.close();
+    store.close();
+  });
   app.addHook("onRequest", async (request, reply) => {
     reply
       .header("X-Content-Type-Options", "nosniff")
@@ -136,6 +139,12 @@ export async function createApp(
       });
     if (error instanceof HttpError)
       return reply.code(error.statusCode).send({ error: error.message });
+    if (error instanceof ResearchError)
+      return reply.code(error.statusCode).send({ error: error.message });
+    if (error instanceof IdentityError)
+      return reply.code(error.statusCode).send({ error: error.message });
+    if (error instanceof MailError)
+      return reply.code(503).send({ error: error.message });
     const known = error as { statusCode?: number; message?: string };
     const status =
       typeof known.statusCode === "number" ? known.statusCode : 500;
@@ -150,14 +159,26 @@ export async function createApp(
     const value = request.cookies[sessionCookie];
     if (!value || value.length > 256) return fail(401, "Sign in to continue.");
     const session = store.db
-      .prepare("SELECT user_id,csrf,expires FROM sessions WHERE hash = ?")
+      .prepare(
+        "SELECT user_id,csrf,expires,last_seen FROM sessions WHERE hash = ?",
+      )
       .get(digest(value)) as SessionRow | undefined;
-    if (!session || session.expires <= Date.now())
+    if (
+      !session ||
+      session.expires <= Date.now() ||
+      session.last_seen <= Date.now() - 30 * 60 * 1000
+    )
       return fail(401, "Your session has expired. Sign in again.");
     const user = store.user(session.user_id);
     if (!user) return fail(401, "Sign in to continue.");
+    if (!user.email_verified_at)
+      return fail(401, "Verify your email by signing in again.");
     if (mutation && request.headers["x-csrf-token"] !== session.csrf)
       return fail(403, "Refresh the page and try again.");
+    if (session.last_seen < Date.now() - 60000)
+      store.db
+        .prepare("UPDATE sessions SET last_seen=? WHERE hash=?")
+        .run(Date.now(), digest(value));
     return { user, csrf: session.csrf };
   }
   function snapshot(auth: Auth) {
@@ -183,9 +204,9 @@ export async function createApp(
     store.db.prepare("DELETE FROM sessions WHERE expires <= ?").run(Date.now());
     store.db
       .prepare(
-        "INSERT INTO sessions(hash,user_id,csrf,expires) VALUES(?,?,?,?)",
+        "INSERT INTO sessions(hash,user_id,csrf,expires,last_seen) VALUES(?,?,?,?,?)",
       )
-      .run(digest(value), user.id, csrf, Date.now() + 7 * 86400000);
+      .run(digest(value), user.id, csrf, Date.now() + 7 * 86400000, Date.now());
     reply.setCookie(sessionCookie, value, {
       httpOnly: true,
       secure: production,
@@ -203,16 +224,21 @@ export async function createApp(
       plan: { ...(JSON.parse(row.data) as Plan), revision: row.revision },
     };
   };
-  function validDetails(input: z.infer<typeof details>, user: UserRow) {
+  function validDetails(
+    input: z.infer<typeof details>,
+    user: UserRow,
+    previous?: Plan,
+  ) {
     const experience = experiences.find(
       (item) => item.id === input.experienceId,
     );
-    if (!experience) return fail(400, "Choose a valid experience.");
-    if (input.people > experience.capacity)
-      return fail(
-        400,
-        `This experience supports up to ${experience.capacity} people.`,
-      );
+    const researched =
+      input.experienceId === "researched" && previous?.proposal;
+    if (!experience && !researched)
+      return fail(400, "Choose a valid experience.");
+    const capacity = experience?.capacity ?? 20;
+    if (input.people > capacity)
+      return fail(400, `This experience supports up to ${capacity} people.`);
     if (input.date < today()) return fail(400, "Choose today or a later date.");
     const team = store.members(user.team_id);
     const attendees = [...new Set(input.attendees)];
@@ -225,7 +251,13 @@ export async function createApp(
         400,
         "Attendees must belong to your team and include the organiser.",
       );
-    return { ...input, attendees, unitPrice: experience.price };
+    return {
+      ...input,
+      attendees,
+      unitPrice: researched
+        ? costTotal(researched.costs, input.people) / input.people
+        : experience!.price,
+    };
   }
   function write(plan: Plan, teamId: string, revision: number) {
     const result = store.db
@@ -251,57 +283,14 @@ export async function createApp(
       throw error;
     }
   });
-  app.post(
-    "/api/auth/register",
-    { config: authRate },
-    async (request, reply) => {
-      const input = account
-        .extend({ teamName: text(80) })
-        .strict()
-        .parse(request.body);
-      const password = await hashPassword(input.password);
-      const userId = randomUUID(),
-        teamId = randomUUID();
-      store.transaction(() => {
-        if (store.userByEmail(input.email))
-          fail(
-            409,
-            "An account already exists for this email. Sign in instead.",
-          );
-        store.db
-          .prepare("INSERT INTO teams(id,name,created_at) VALUES(?,?,?)")
-          .run(teamId, input.teamName, new Date().toISOString());
-        store.db
-          .prepare(
-            "INSERT INTO users(id,team_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)",
-          )
-          .run(userId, teamId, input.name, input.email, password, "manager");
-      });
-      reply.code(201);
-      return session(store.user(userId)!, reply);
-    },
-  );
-  app.post("/api/auth/login", { config: authRate }, async (request, reply) => {
-    const input = z
-      .object({
-        email: z.email().transform((value) => value.toLowerCase()),
-        password: z.string().min(1).max(128),
-      })
-      .strict()
-      .parse(request.body);
-    const user = store.userByEmail(input.email);
-    const verified = await verifyPassword(
-      input.password,
-      user?.password_hash ?? dummyPassword,
-    );
-    if (!user || !verified)
-      return fail(401, "The email or password is incorrect.");
-    const previous = request.cookies[sessionCookie];
-    if (previous)
-      store.db
-        .prepare("DELETE FROM sessions WHERE hash = ?")
-        .run(digest(previous));
-    return session(user, reply);
+  registerIdentity(app, store, {
+    production,
+    authLimit: options.authLimit ?? 10,
+    mailer: options.mailer,
+    secret: options.authSecret,
+    authenticate,
+    session,
+    dummyPassword,
   });
   app.post("/api/auth/logout", async (request, reply) => {
     authenticate(request, true);
@@ -339,56 +328,33 @@ export async function createApp(
       role: input.role,
     };
   });
-  app.post("/api/auth/join", { config: authRate }, async (request, reply) => {
-    const input = account
-      .extend({ inviteCode: z.string().min(20).max(128) })
-      .strict()
-      .parse(request.body);
-    const password = await hashPassword(input.password),
-      id = randomUUID();
-    store.transaction(() => {
-      const invite = store.db
-        .prepare(
-          "SELECT id,team_id,role,expires,used_by FROM invites WHERE token_hash = ?",
-        )
-        .get(digest(input.inviteCode)) as
-        | {
-            id: string;
-            team_id: string;
-            role: string;
-            expires: number;
-            used_by: string | null;
-          }
-        | undefined;
-      if (!invite || invite.used_by || invite.expires <= Date.now())
-        return fail(
-          400,
-          "This invitation is invalid, expired, or already used.",
-        );
-      if (store.userByEmail(input.email))
-        fail(409, "An account already exists for this email. Sign in instead.");
-      store.db
-        .prepare(
-          "INSERT INTO users(id,team_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)",
-        )
-        .run(
-          id,
-          invite.team_id,
-          input.name,
-          input.email,
-          password,
-          invite.role,
-        );
-      store.db
-        .prepare(
-          "UPDATE invites SET used_by = ? WHERE id = ? AND used_by IS NULL",
-        )
-        .run(id, invite.id);
-    });
-    reply.code(201);
-    return session(store.user(id)!, reply);
-  });
   app.get("/api/state", async (request) => snapshot(authenticate(request)));
+  app.get("/api/research/config", async (request) => {
+    authenticate(request);
+    return research.setup();
+  });
+  app.post("/api/research", async (request) =>
+    research.start(authenticate(request, true).user, request.body),
+  );
+  app.get<{ Params: { id: string } }>("/api/research/:id", async (request) =>
+    research.read(request.params.id, authenticate(request).user),
+  );
+  app.post<{ Params: { id: string } }>(
+    "/api/research/:id/cancel",
+    async (request) =>
+      research.cancel(request.params.id, authenticate(request, true).user),
+  );
+  app.post<{ Params: { id: string } }>(
+    "/api/research/:id/accept",
+    async (request) => {
+      const { user } = authenticate(request, true);
+      const input = z
+        .object({ optionId: z.uuid() })
+        .strict()
+        .parse(request.body);
+      return research.accept(request.params.id, user, input.optionId);
+    },
+  );
   app.post("/api/plans", async (request, reply) => {
     const { user } = authenticate(request, true);
     const input = validDetails(details.parse(request.body), user);
@@ -414,6 +380,12 @@ export async function createApp(
       .extend({
         revision: z.number().int().positive(),
         submit: z.boolean().default(false),
+        costs: z
+          .array(costSchema.pick({ label: true, amount: true, unit: true }))
+          .min(1)
+          .max(6)
+          .optional(),
+        itinerary: itinerarySchema.optional(),
       })
       .parse(request.body);
     if (row.creator_id !== user.id)
@@ -422,14 +394,85 @@ export async function createApp(
       return fail(409, "This plan is no longer editable.");
     if (input.revision !== row.revision)
       return fail(409, "This plan changed elsewhere. Refresh before editing.");
-    const { revision: _revision, submit, ...fields } = input;
-    const validated = validDetails(fields, user);
-    if (submit && validated.unitPrice * validated.people > validated.budget)
+    const { revision: _revision, submit, costs, itinerary, ...fields } = input;
+    const validated = validDetails(fields, user, plan);
+    let proposal =
+      fields.experienceId === "researched" ? plan.proposal : undefined;
+    if (costs && !proposal)
+      return fail(
+        400,
+        "Custom costs are only available on a researched draft.",
+      );
+    if (itinerary && !proposal)
+      return fail(
+        400,
+        "Custom itinerary is only available on a researched draft.",
+      );
+    if (proposal && costs) {
+      const changed =
+        JSON.stringify(costs) !==
+        JSON.stringify(
+          proposal.costs.map(({ label, amount, unit }) => ({
+            label,
+            amount,
+            unit,
+          })),
+        );
+      proposal = {
+        ...proposal,
+        organiserEdited: proposal.organiserEdited || changed,
+        costs: costs.map((line, index) => {
+          const prior = proposal!.costs[index];
+          return prior &&
+            prior.label === line.label &&
+            prior.amount === line.amount &&
+            prior.unit === line.unit
+            ? prior
+            : { ...line, basis: "estimate" as const };
+        }),
+      };
+    }
+    if (proposal) {
+      const rows = (itinerary ?? proposal.itinerary).map((item, index) => ({
+        ...item,
+        time: index === 0 ? validated.time : item.time,
+      }));
+      if (
+        rows.some(
+          (item, index) => index > 0 && item.time < rows[index - 1].time,
+        )
+      )
+        return fail(400, "Keep itinerary times in chronological order.");
+      proposal = {
+        ...proposal,
+        organiserEdited:
+          proposal.organiserEdited ||
+          JSON.stringify(rows) !== JSON.stringify(proposal.itinerary),
+        itinerary: rows,
+        openQuestions: proposal.openQuestions.map((question) =>
+          question ===
+          `Confirm availability for ${plan.people} people on ${plan.date}.`
+            ? `Confirm availability for ${validated.people} people on ${validated.date}.`
+            : question,
+        ),
+      };
+    }
+    const estimate = proposal
+      ? costTotal(proposal.costs, validated.people)
+      : validated.unitPrice * validated.people;
+    if (estimate <= 0 || estimate > 100000000)
+      return fail(
+        400,
+        "Estimate must be positive and no more than 100,000,000 NGN.",
+      );
+    if (submit && estimate > validated.budget)
       return fail(400, "The estimate is above your budget.");
     return write(
       {
         ...plan,
         ...validated,
+        proposal,
+        unitPrice: proposal ? estimate / validated.people : validated.unitPrice,
         status: submit ? "Awaiting approval" : "Draft",
         going: plan.going.filter((id) => validated.attendees.includes(id)),
         declined: (plan.declined ?? []).filter((id) =>
@@ -475,11 +518,11 @@ export async function createApp(
           return fail(409, "This plan is not awaiting approval.");
         if (input.action === "approve") {
           if (
-            (plan.unitPrice ??
-              experiences.find((item) => item.id === plan.experienceId)!
-                .price) *
-              plan.people >
-            plan.budget
+            (plan.proposal
+              ? costTotal(plan.proposal.costs, plan.people)
+              : (plan.unitPrice ??
+                  experiences.find((item) => item.id === plan.experienceId)!
+                    .price) * plan.people) > plan.budget
           )
             return fail(400, "An over-budget plan cannot be approved.");
           if (plan.date < today())

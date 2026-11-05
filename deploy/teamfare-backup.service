@@ -1,0 +1,9 @@
+[Unit]
+Description=Teamfare SQLite online backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/teamfare/current/deploy/backup.sh
+UMask=0077

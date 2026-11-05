@@ -32,3 +32,5 @@ secrets
 .cache
 coverage
 blob-report
+server/tests
+tests

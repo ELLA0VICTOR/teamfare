@@ -17,11 +17,13 @@ import { ExperienceArt } from "./components/ExperienceArt";
 import { ExpenseForm } from "./components/Forms";
 import { ExpenseLedger, SpendBar } from "./components/ExpenseLedger";
 import { Modal } from "./components/Modal";
+import { ResearchPanel } from "./components/ResearchPanel";
+import { AccountSecurity } from "./components/AccountSecurity";
+import type { ResearchRequest } from "./components/ResearchPanel";
 import { PlanSheet } from "./components/PlanSheet";
 import { RouteLine } from "./components/RouteLine";
 import {
   dateLabel,
-  experienceFor,
   initialDemo,
   loadDemo,
   localDate,
@@ -37,6 +39,7 @@ import {
   placeFor,
   totalFor,
   priceFor,
+  planExperience,
 } from "./plan";
 import type { Role } from "./plan";
 import "./App.css";
@@ -49,7 +52,7 @@ type Dialog =
   | { type: "experience"; experience: Experience }
   | { type: "expense"; planId?: string }
   | { type: "cancel"; id: string }
-  | { type: "about" | "reset" | "people" | "invite" }
+  | { type: "about" | "reset" | "people" | "invite" | "security" }
   | null;
 const navigation = [
   { view: "discover", label: "Home", icon: HomeIcon },
@@ -84,6 +87,8 @@ export default function App({
       )?.name ?? "a manager")
     : "Nadia Bello";
   const teamName = connection?.team.name ?? "Koto team";
+  const [researchRequest, setResearchRequest] =
+    useState<ResearchRequest | null>(null);
   const [saving, setSaving] = useState(false),
     [syncError, setSyncError] = useState(false);
   const [invitation, setInvitation] = useState<{
@@ -274,6 +279,16 @@ export default function App({
           attendees: plan.attendees,
           revision: plan.revision,
           submit: plan.status === "Awaiting approval",
+          ...(plan.proposal
+            ? {
+                costs: plan.proposal.costs.map(({ label, amount, unit }) => ({
+                  label,
+                  amount,
+                  unit,
+                })),
+                itinerary: plan.proposal.itinerary,
+              }
+            : {}),
         },
         "PUT",
       );
@@ -322,6 +337,26 @@ export default function App({
       else setToast("Sign out could not be completed. Please try again.");
     }
   }
+  function beginResearch(values: ComposerValues) {
+    if (values.brief.trim().length < 10) {
+      setToast(
+        "Describe the outing in at least ten characters to begin research.",
+      );
+      return;
+    }
+    setResearchRequest({ ...values, requestId: crypto.randomUUID() });
+    navigate("research");
+  }
+  const researchStarted = useCallback((id: string) => {
+    window.location.hash = `research/${id}`;
+  }, []);
+  const researchSaved = useCallback(
+    async (plan: Plan) => {
+      await refresh();
+      window.location.hash = `plan/${plan.id}`;
+    },
+    [refresh],
+  );
   async function start(
     values: ComposerValues = {
       brief: "",
@@ -605,6 +640,14 @@ export default function App({
                           Invite teammate
                         </button>
                       )}
+                      <button
+                        onClick={() => {
+                          setDialog({ type: "security" });
+                          setProfileOpen(false);
+                        }}
+                      >
+                        Account security
+                      </button>
                       <button onClick={() => void signOut()}>Sign out</button>
                       <p>{connection?.user.email}</p>
                     </>
@@ -648,17 +691,49 @@ export default function App({
               close this page.
             </p>
           )}
-          {view === "discover" && (
+          {view === "discover" && !route.startsWith("research") && (
             <Home
               demo={demo}
               role={role}
               onStart={start}
+              onResearch={live ? beginResearch : undefined}
               onSaveIdea={saveIdea}
               onExplore={(experience) =>
                 setDialog({ type: "experience", experience })
               }
             />
           )}
+          {route.startsWith("research") &&
+            (live ? (
+              <ResearchPanel
+                key={
+                  route.startsWith("research/")
+                    ? route.slice(9)
+                    : (researchRequest?.requestId ?? "research")
+                }
+                runId={
+                  route.startsWith("research/") ? route.slice(9) : undefined
+                }
+                request={researchRequest}
+                csrf={connection!.csrfToken}
+                onStarted={researchStarted}
+                onSaved={researchSaved}
+                onManual={start}
+                onRestart={beginResearch}
+                onExpired={onExit}
+              />
+            ) : (
+              <div className="empty-state">
+                <h1>Research with your team.</h1>
+                <p>
+                  Sign in to research real outing options and save a shared
+                  draft.
+                </p>
+                <button className="button button-dark" onClick={onExit}>
+                  Sign in
+                </button>
+              </div>
+            ))}
           {view === "plans" &&
             (route.startsWith("plan/") ? (
               selectedPlan ? (
@@ -744,9 +819,7 @@ export default function App({
                       aria-label={`View ${plan.title}`}
                     >
                       <div className="plan-thumbnail">
-                        <ExperienceArt
-                          experience={experienceFor(plan.experienceId)}
-                        />
+                        <ExperienceArt experience={planExperience(plan)} />
                       </div>
                       <div className="plan-row-main">
                         <h2>{plan.title}</h2>
@@ -761,7 +834,11 @@ export default function App({
                           {money(totalFor(plan))}
                           <small>Estimate · total</small>
                         </strong>
-                        <span>{money(priceFor(plan))} per person</span>
+                        <span>
+                          {plan.proposal ? "≈ " : ""}
+                          {money(priceFor(plan))}{" "}
+                          {plan.proposal ? "average per person" : "per person"}
+                        </span>
                         <span
                           className={`row-action ${needsYou(plan, role, live ? viewerId : "akin") ? "needs-action" : ""}`}
                         >
@@ -914,7 +991,9 @@ export default function App({
                           </p>
                           <p className="group-estimate">
                             Estimate {money(totalFor(plan))} total ·{" "}
-                            {money(priceFor(plan))} per person × {plan.people}
+                            {plan.proposal
+                              ? `≈ ${money(priceFor(plan))} average per person`
+                              : `${money(priceFor(plan))} per person × ${plan.people}`}
                           </p>
                         </div>
                         <div className="group-spend">
@@ -980,6 +1059,15 @@ export default function App({
             <X size={16} />
           </button>
         </div>
+        {dialog?.type === "security" && connection && (
+          <Modal title="Account security" onClose={() => setDialog(null)}>
+            <AccountSecurity
+              csrf={connection.csrfToken}
+              email={connection.user.email}
+              onSignedOut={onExit}
+            />
+          </Modal>
+        )}
         {dialog?.type === "invite" && live && role === "manager" && (
           <Modal title="Invite teammate" onClose={() => setDialog(null)}>
             <h2>A place at the table.</h2>

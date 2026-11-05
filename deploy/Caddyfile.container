@@ -1,0 +1,5 @@
+{$TEAMFARE_DOMAIN} {
+    encode zstd gzip
+    header -Server
+    reverse_proxy teamfare:3001
+}

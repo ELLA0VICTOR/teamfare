@@ -1,3 +1,4 @@
+import { verifyEmail } from "../account-helpers";
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { readFile, mkdir } from "node:fs/promises";
@@ -39,9 +40,11 @@ test("two actual accounts share an outing, enforce review, RSVP, record spending
   await manager.getByLabel("Team name").fill("Shared design team");
   await manager.getByLabel("Email", { exact: true }).fill(managerEmail);
   await manager.getByLabel("Password", { exact: true }).fill(password);
+  await manager.getByLabel("Confirm password", { exact: true }).fill(password);
   await manager
     .getByRole("button", { name: "Create team", exact: true })
     .click();
+  await verifyEmail(manager, managerEmail);
   await expect(
     manager.getByRole("heading", { name: "Bring your team together." }),
   ).toBeVisible();
@@ -66,9 +69,11 @@ test("two actual accounts share an outing, enforce review, RSVP, record spending
   await employee.getByLabel("Invitation code").fill(code);
   await employee.getByLabel("Email", { exact: true }).fill(employeeEmail);
   await employee.getByLabel("Password", { exact: true }).fill(password);
+  await employee.getByLabel("Confirm password", { exact: true }).fill(password);
   await employee
     .getByRole("button", { name: "Join team", exact: true })
     .click();
+  await verifyEmail(employee, employeeEmail);
   await employee
     .getByRole("button", { name: "Start a plan", exact: true })
     .click();
@@ -157,6 +162,7 @@ test("two actual accounts share an outing, enforce review, RSVP, record spending
     .getByRole("button", { name: "Sign in", exact: true })
     .last()
     .click();
+  await verifyEmail(employee, employeeEmail);
   await expect(
     employee.getByRole("button", { name: "Account", exact: true }),
   ).toBeVisible();

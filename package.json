@@ -12,10 +12,12 @@
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "test:api": "node --test server/tests/*.test.ts",
     "test:live": "playwright test -c playwright.live.config.ts",
+    "test:agent": "playwright test -c playwright.agent.config.ts",
+    "agent:models": "node server/agent/models.ts",
     "lint": "oxlint",
     "preview": "vite preview",
     "test:browser": "playwright test",
-    "format": "prettier --write src server tests playwright.config.ts playwright.live.config.ts"
+    "format": "prettier --write src server tests playwright.config.ts playwright.live.config.ts playwright.agent.config.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

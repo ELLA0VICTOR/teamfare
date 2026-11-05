@@ -1,0 +1,33 @@
+# Always use after the root compose.yaml, with --project-name teamfare.
+services:
+  teamfare:
+    mem_limit: 1g
+    volumes:
+      - ${TEAMFARE_BACKUP_DIR:-/opt/teamfare/backups}:/backups
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      TEAMFARE_DOMAIN: ${TEAMFARE_DOMAIN:?Set the production hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile.container:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      teamfare:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  caddy-data:
+  caddy-config:

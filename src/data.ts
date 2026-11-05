@@ -1,3 +1,4 @@
+import type { ResearchedProposal, ResearchRun } from "./research.ts";
 export type Category =
   "All experiences" | "Good food" | "Make something" | "A little adventure";
 export type View = "discover" | "plans" | "expenses";
@@ -41,6 +42,7 @@ export type Plan = {
   createdBy?: string;
   revision?: number;
   unitPrice?: number;
+  proposal?: ResearchedProposal;
 };
 export type PlanEvent = {
   id: string;
@@ -62,6 +64,7 @@ export type Demo = {
   expenses: Expense[];
   saved: string[];
   preference: string;
+  researchRuns?: ResearchRun[];
 };
 export const members = [
   {

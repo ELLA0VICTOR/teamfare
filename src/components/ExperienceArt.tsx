@@ -15,13 +15,15 @@ export function ExperienceArt({ experience }: { experience: Experience }) {
       className={`experience-image experience-image-${experience.id}`}
       src={experience.image}
       alt={
-        experience.id === "long-table"
-          ? "A carefully plated meal on a restaurant table"
-          : experience.id === "clay"
-            ? "Clay-covered hands shaping a bowl on a pottery wheel"
-            : experience.id === "court"
-              ? "Tennis rackets and a ball resting beside a sunlit court"
-              : "Warmly lit dining room with tables set for dinner"
+        experience.id === "researched"
+          ? "Illustrative activity photograph, not a photograph of the researched venue"
+          : experience.id === "long-table"
+            ? "A carefully plated meal on a restaurant table"
+            : experience.id === "clay"
+              ? "Clay-covered hands shaping a bowl on a pottery wheel"
+              : experience.id === "court"
+                ? "Tennis rackets and a ball resting beside a sunlit court"
+                : "Warmly lit dining room with tables set for dinner"
       }
       loading="lazy"
     />

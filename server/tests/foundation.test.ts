@@ -1,10 +1,11 @@
+import { createApp as actualApp } from "../app.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createApp } from "../app.ts";
+import { createApp, verifiedAccount } from "./helpers.ts";
 import { digest } from "../auth.ts";
 
 const origin = "http://localhost:5173";
@@ -16,13 +17,12 @@ async function register(
   name = "Manager One",
   email = "manager@example.test",
 ): Promise<Account> {
-  const result = await app.inject({
-    method: "POST",
-    url: "/api/auth/register",
-    headers: { origin },
-    payload: { name, email, password, teamName: `${name} team` },
+  const result = await verifiedAccount(app, "/api/auth/register", origin, {
+    name,
+    email,
+    password,
+    teamName: `${name} team`,
   });
-  assert.equal(result.statusCode, 201, result.body);
   return {
     cookie: result.cookies[0].name + "=" + result.cookies[0].value,
     csrf: result.json().csrfToken,
@@ -54,18 +54,12 @@ async function joinTeam(
     role,
   });
   assert.equal(invitation.statusCode, 200, invitation.body);
-  const joined = await app.inject({
-    method: "POST",
-    url: "/api/auth/join",
-    headers: { origin },
-    payload: {
-      name: "Employee One",
-      email,
-      password,
-      inviteCode: invitation.json().code,
-    },
+  const joined = await verifiedAccount(app, "/api/auth/join", origin, {
+    name: "Employee One",
+    email,
+    password,
+    inviteCode: invitation.json().code,
   });
-  assert.equal(joined.statusCode, 201, joined.body);
   assert.equal(joined.json().user.role, role);
   return {
     cookie: joined.cookies[0].name + "=" + joined.cookies[0].value,
@@ -284,13 +278,32 @@ test("shared workflow is durable across accounts and rejects forged authority an
 
 test("production serves the built frontend with secure cookies and security headers", async (t) => {
   const httpsOrigin = "https://teamfare.example.test";
-  const app = await createApp({
+  const envKeys = ["AUTH_SECRET", "RESEND_API_KEY", "EMAIL_FROM"] as const;
+  const previous = envKeys.map((key) => process.env[key]);
+  process.env.AUTH_SECRET = "production-test-secret-at-least-32-characters";
+  process.env.RESEND_API_KEY = "test-only-resend-key";
+  process.env.EMAIL_FROM = "Teamfare <security@example.test>";
+  const actualFetch = globalThis.fetch;
+  let emailedCode = "";
+  globalThis.fetch = async (_url, init) => {
+    const payload = JSON.parse(String(init?.body));
+    emailedCode = payload.text.match(/is (\d{6})\./)?.[1] ?? "";
+    return Response.json({ id: "test-only-mail-id" });
+  };
+  const app = await actualApp({
     databasePath: ":memory:",
     origin: httpsOrigin,
     production: true,
     serveStatic: true,
   });
-  t.after(() => app.close());
+  t.after(async () => {
+    await app.close();
+    globalThis.fetch = actualFetch;
+    envKeys.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  });
   const home = await app.inject({ method: "GET", url: "/" });
   assert.equal(home.statusCode, 200);
   assert.ok(home.body.includes("Teamfare"));
@@ -304,11 +317,20 @@ test("production serves the built frontend with secure cookies and security head
       name: "Manager",
       email: "production@example.test",
       password,
+      confirmPassword: password,
       teamName: "Production test",
     },
   });
-  assert.equal(registered.statusCode, 201);
-  const setCookie = String(registered.headers["set-cookie"]);
+  assert.equal(registered.statusCode, 202, registered.body);
+  assert.equal(registered.cookies.length, 0);
+  const verified = await app.inject({
+    method: "POST",
+    url: "/api/auth/verify",
+    headers: { origin: httpsOrigin },
+    payload: { challengeId: registered.json().challengeId, code: emailedCode },
+  });
+  assert.equal(verified.statusCode, 200, verified.body);
+  const setCookie = String(verified.headers["set-cookie"]);
   assert.match(setCookie, /HttpOnly/);
   assert.match(setCookie, /Secure/);
   assert.match(setCookie, /SameSite=Lax/);
@@ -368,6 +390,7 @@ test("sessions, origins, CSRF, invitations, input validation and manager self-ap
     name: "New Teammate",
     email: "new@example.test",
     password,
+    confirmPassword: password,
     inviteCode: invite.code,
   };
   assert.equal(
@@ -381,13 +404,12 @@ test("sessions, origins, CSRF, invitations, input validation and manager self-ap
     ).statusCode,
     400,
   );
-  const joined = await app.inject({
-    method: "POST",
-    url: "/api/auth/join",
-    headers: { origin },
-    payload: joinPayload,
-  });
-  assert.equal(joined.statusCode, 201);
+  const joined = await verifiedAccount(
+    app,
+    "/api/auth/join",
+    origin,
+    joinPayload,
+  );
   assert.equal(
     (
       await app.inject({

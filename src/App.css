@@ -1,4 +1,347 @@
 /* Teamfare / The Plan Sheet */
+.research-page {
+  padding: 24px 0 64px;
+}
+.research-page .page-heading {
+  padding-top: 20px;
+}
+.research-brief {
+  border-block: 1px solid var(--rule);
+  padding: 24px 0;
+}
+.research-brief > p {
+  max-width: 800px;
+  font-size: 19px;
+}
+.research-brief > span {
+  display: block;
+  margin-top: 12px;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+.research-progress {
+  padding: 32px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.research-progress h2 {
+  font-size: 30px;
+}
+.research-progress .section-heading {
+  margin-bottom: 12px;
+}
+.research-events {
+  list-style: none;
+  padding: 0;
+  margin-top: 20px;
+  max-width: 900px;
+}
+.research-events li {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+}
+.research-events svg {
+  color: var(--forest);
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.research-events time {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.research-status {
+  font-size: 14px;
+  color: var(--ink-3);
+  margin-top: 24px;
+}
+.research-notice {
+  padding: 28px 0;
+  border-bottom: 1px solid var(--rule);
+  max-width: 850px;
+}
+.research-notice h2 {
+  font-size: 30px;
+}
+.research-notice p {
+  color: var(--ink-2);
+  margin: 12px 0 20px;
+}
+.research-summary {
+  padding: 40px 0 28px;
+  max-width: 850px;
+}
+.research-summary p {
+  margin-top: 16px;
+  color: var(--ink-2);
+}
+.research-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 48px;
+}
+.research-option {
+  border-top: 2px solid var(--forest);
+  padding: 28px 0;
+  min-width: 0;
+}
+.research-option-heading h2 {
+  font-size: 34px;
+  margin-top: 16px;
+}
+.research-option-heading p {
+  font-size: 14px;
+  color: var(--ink-3);
+  margin: 12px 0 20px;
+}
+.research-option > p {
+  font-size: 16px;
+}
+.research-option .option-reason {
+  color: var(--ink-2);
+  margin: 16px 0 24px;
+}
+.research-option > .button {
+  margin-top: 24px;
+}
+.research-options .cost-ledger .ledger-total {
+  font-size: 17px;
+}
+.option-itinerary {
+  margin-top: 28px;
+}
+.option-itinerary h3,
+.dietary-notes strong,
+.open-questions h3,
+.evidence-block h3,
+.proposal-editor h3 {
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+.option-itinerary > div {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid var(--rule);
+  padding: 16px 0;
+}
+.option-itinerary time {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.option-itinerary p {
+  font-size: 14px;
+}
+.option-itinerary strong {
+  font-weight: 500;
+}
+.option-itinerary p span {
+  display: block;
+  color: var(--ink-3);
+  margin-top: 4px;
+}
+.dietary-notes {
+  margin-top: 24px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.dietary-notes strong {
+  display: block;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.open-questions {
+  margin-top: 24px;
+}
+.open-questions ul {
+  padding-left: 20px;
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.open-questions li {
+  margin-top: 8px;
+}
+.evidence-block {
+  margin-top: 28px;
+  border-top: 1px solid var(--rule);
+  padding-top: 24px;
+}
+.evidence-block > .field-help {
+  margin-top: 8px;
+}
+.evidence-block ol {
+  padding: 0;
+  list-style: none;
+}
+.evidence-block li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.evidence-block a {
+  display: inline-block;
+  min-height: 44px;
+  padding: 10px 0;
+  color: var(--forest);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.evidence-block li > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.evidence-block details {
+  margin-top: 8px;
+}
+.evidence-block summary {
+  cursor: pointer;
+  font-size: 13px;
+  min-height: 44px;
+  padding: 12px 0;
+}
+.evidence-block details p {
+  font-size: 14px;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+.price-quotes {
+  margin-top: 24px;
+}
+.price-quotes blockquote {
+  border-left: 1px solid var(--rule);
+  padding-left: 16px;
+  margin: 16px 0 0;
+  font-size: 14px;
+}
+.price-quotes blockquote > span {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.research-limitations {
+  margin-top: 24px;
+  max-width: 850px;
+}
+.research-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+.recent-research {
+  padding: 32px 0 40px;
+  border-top: 1px solid var(--rule);
+}
+.recent-research h2 {
+  font-size: 28px;
+}
+.recent-research > a {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  border-top: 1px solid var(--rule);
+  padding: 20px 0;
+  min-height: 44px;
+}
+.recent-research > a > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.recent-research small {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.research-provenance > p + p {
+  margin-top: 12px;
+}
+.researched-venue-name {
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 400;
+  margin-bottom: 16px;
+}
+.proposal-editor {
+  border-top: 1px solid var(--rule);
+  padding-top: 24px;
+  margin-top: 24px;
+}
+.proposal-editor > h3 {
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+.proposal-editor > h3:first-child {
+  margin-top: 0;
+}
+.proposal-cost-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: end;
+}
+.proposal-itinerary-edit {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.next-up-image > .field-help {
+  display: block;
+  margin-top: 8px;
+}
+@media (max-width: 900px) {
+  .research-options {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .proposal-cost-edit {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .research-page {
+    padding-top: 16px;
+  }
+  .research-page .page-heading h1 {
+    font-size: 42px;
+  }
+  .research-progress .section-heading {
+    display: block;
+  }
+  .research-progress .section-heading .button {
+    margin-top: 16px;
+  }
+  .research-option-heading h2 {
+    font-size: 32px;
+  }
+  .research-events {
+    width: 100%;
+  }
+  .recent-research > a {
+    gap: 12px;
+    font-size: 14px;
+  }
+  .recent-research > a > span {
+    max-width: 60%;
+  }
+  .proposal-itinerary-edit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .composer-actions:has([value="research"]) {
+    flex-wrap: wrap;
+  }
+  .composer-actions:has([value="research"]) .button {
+    flex-basis: 100%;
+  }
+}
 .account-gate {
   padding-block: 36px 64px;
 }
@@ -2171,4 +2514,31 @@ main:focus {
   body:has(.sheet-page) .toast {
     bottom: calc(180px + env(safe-area-inset-bottom));
   }
+}
+
+.code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: center;
+}
+.account-notice {
+  padding: 16px;
+  background: var(--forest-tint);
+  font-size: 14px;
+}
+.account-security {
+  padding: 24px;
+}
+.account-security h2 {
+  margin-top: 0;
+}
+.security-sessions {
+  border-top: 1px solid var(--rule);
+  margin-top: 32px;
+  padding-top: 24px;
+}
+.account-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
